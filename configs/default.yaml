@@ -1,0 +1,26 @@
+# pitch-vision default configuration
+seed: 42
+device: auto            # auto | cuda | mps | cpu
+
+paths:
+  data_dir: data
+  outputs_dir: outputs
+  soccernet_dir: data/soccernet
+
+detector:
+  weights: yolo11n.pt   # COCO-pretrained; person=0, sports ball=32
+  classes: [0, 32]
+  conf: 0.25
+  imgsz: 1280           # players are small in wide broadcast shots — keep resolution high
+
+tracker:
+  name: botsort         # ultralytics built-in: botsort | bytetrack
+
+split:
+  policy: match_disjoint
+  ratios: [0.7, 0.15, 0.15]   # train / val / test
+  group_key: match_id         # whole matches never cross splits
+
+eval:
+  metrics: [HOTA, MOTA, IDF1]
+  format: mot_challenge
