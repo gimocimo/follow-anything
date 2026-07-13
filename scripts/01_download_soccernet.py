@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
-"""Download SoccerNet-Tracking data.
+"""Download SoccerNet-Tracking (2023) data.
 
 Requires SoccerNet NDA access; pass the password they provide (the commonly
-distributed one is the default). The data is large, so we default to the
-`train` split only — it ships public ground truth, which is all the baseline
-needs. Add `test`/`challenge` later for the full benchmark.
+distributed one is the default). The data downloads as zips from SoccerNet's
+server and this script extracts them.
+
+The data is large, so we default to the `train` split only — it ships public
+ground truth, which is all the baseline needs. Splits:
+    train         images + public GT   (what the baseline uses)
+    test          images only
+    test_labels   private test GT       (needed to evaluate on the official test set)
+    challenge     images only
 
     python scripts/01_download_soccernet.py --data-dir data/soccernet --splits train
 """
 import argparse
+import zipfile
 from pathlib import Path
+
+TASK = "tracking-2023"
 
 
 def main() -> None:
@@ -20,7 +29,7 @@ def main() -> None:
     ap.add_argument("--password", default="s0cc3rn3t", help="SoccerNet NDA password")
     ap.add_argument(
         "--splits", nargs="+", default=["train"],
-        choices=["train", "valid", "test", "challenge"],
+        choices=["train", "test", "test_labels", "challenge"],
     )
     args = ap.parse_args()
 
@@ -31,8 +40,21 @@ def main() -> None:
 
     dl = SoccerNetDownloader(LocalDirectory=str(data_dir))
     dl.password = args.password
-    print(f"Downloading SoccerNet-Tracking splits={args.splits} into {data_dir} ...")
-    dl.downloadDataTask(task="tracking", split=args.splits, password=args.password)
+    print(f"Downloading SoccerNet {TASK} splits={args.splits} into {data_dir} ...")
+    print("(if you see 'not uploaded on the server yet' that means an HTTP error "
+          "— usually a wrong password.)")
+    dl.downloadDataTask(task=TASK, split=args.splits, password=args.password)
+
+    # Extract any zips that aren't already unpacked.
+    task_dir = data_dir / TASK
+    for z in sorted(task_dir.glob("*.zip")):
+        target = task_dir / z.stem
+        if target.is_dir():
+            print(f"  already extracted: {z.name}")
+            continue
+        print(f"  extracting {z.name} ...")
+        with zipfile.ZipFile(z) as zf:
+            zf.extractall(task_dir)
 
     seqinfos = sorted(data_dir.glob("**/seqinfo.ini"))
     print(f"\nDone. Found {len(seqinfos)} sequence(s).")
@@ -44,7 +66,9 @@ def main() -> None:
             if p.exists():
                 print(f"\n--- {ini} (first 800 chars) ---")
                 print(p.read_text()[:800])
-        print("\nNext: python scripts/03_make_splits.py --data-dir", args.data_dir)
+        print(f"\nNext: python scripts/03_make_splits.py --data-dir {args.data_dir}")
+    else:
+        print("No sequences found after extraction — check the download messages above.")
 
 
 if __name__ == "__main__":
