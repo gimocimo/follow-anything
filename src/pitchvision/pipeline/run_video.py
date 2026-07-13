@@ -88,3 +88,52 @@ def run_video(
         "video": str(out_video),
         "mot": str(out_mot),
     }
+
+
+def run_image_folder(
+    img_dir,
+    weights: str = "yolo11n.pt",
+    classes=(0, 32),
+    conf: float = 0.25,
+    imgsz: int = 1280,
+    tracker: str = "botsort.yaml",
+    device: str = "auto",
+):
+    """Track over an ordered image sequence (e.g. a SoccerNet `img1/` folder).
+
+    Returns ``(rows, n_frames)`` where each row is
+    ``(frame, id, x, y, w, h, conf)`` (1-indexed frames, top-left xywh).
+
+    Frames are processed in filename order. `persist=True` keeps track IDs
+    across the sequence; the first frame uses `persist=False` so tracker state
+    is reset per sequence (no bleed between clips when this is called in a loop).
+    """
+    from ultralytics import YOLO
+
+    img_dir = Path(img_dir)
+    frames = sorted(img_dir.glob("*.jpg")) or sorted(img_dir.glob("*.png"))
+    if not frames:
+        raise FileNotFoundError(f"no image frames (*.jpg/*.png) in {img_dir}")
+
+    dev = get_device(device)
+    model = YOLO(weights)
+    rows = []
+    for idx, fp in enumerate(frames, start=1):
+        res = model.track(
+            str(fp),
+            classes=list(classes),
+            conf=conf,
+            imgsz=imgsz,
+            tracker=tracker,
+            persist=(idx > 1),
+            device=dev,
+            verbose=False,
+        )
+        b = res[0].boxes
+        if b is not None and b.id is not None:
+            xywh = b.xywh.cpu().numpy()
+            ids = b.id.cpu().numpy()
+            confs = b.conf.cpu().numpy()
+            for (cx, cy, bw, bh), tid, cf in zip(xywh, ids, confs):
+                rows.append((idx, int(tid), cx - bw / 2, cy - bh / 2, bw, bh, float(cf)))
+    return rows, len(frames)

@@ -16,7 +16,9 @@ tqdm>=4.66
 scipy>=1.11
 git+https://github.com/JonathonLuiten/TrackEval.git             # HOTA / MOTA / IDF1
 
+# Data (Rung 1)
+SoccerNet>=0.1.60                                               # SoccerNet-Tracking downloader
+
 # --- Phase 2+ (uncomment when reached) ---
 # boxmot>=11.0                                                     # standalone trackers + re-ID (BoT-SORT, OC-SORT, StrongSORT)
 # git+https://github.com/facebookresearch/sam2.git                # promptable video segmentation/tracking (Rung 2)
-# SoccerNet                                                        # dataset downloader
