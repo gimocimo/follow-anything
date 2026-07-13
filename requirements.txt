@@ -6,6 +6,7 @@
 #   CUDA 12.x (Linux GPU):    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 
 ultralytics>=8.3.0      # YOLO detector + built-in ByteTrack / BoT-SORT tracking
+lap>=0.5.12             # linear assignment — required by ByteTrack / BoT-SORT
 opencv-python>=4.9
 numpy>=1.24
 pyyaml>=6.0
