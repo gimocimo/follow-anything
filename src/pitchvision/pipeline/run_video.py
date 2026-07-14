@@ -104,9 +104,10 @@ def run_image_folder(
     Returns ``(rows, n_frames)`` where each row is
     ``(frame, id, x, y, w, h, conf)`` (1-indexed frames, top-left xywh).
 
-    Frames are processed in filename order. `persist=True` keeps track IDs
-    across the sequence; the first frame uses `persist=False` so tracker state
-    is reset per sequence (no bleed between clips when this is called in a loop).
+    Uses ONE streaming ``model.track`` call over the whole folder so track IDs
+    persist across the sequence. (Calling ``track`` per single frame resets the
+    tracker even with ``persist=True`` — IDs get reused every frame and AssA
+    collapses.) Frame numbers are read from each result's image filename.
     """
     from ultralytics import YOLO
 
@@ -118,22 +119,28 @@ def run_image_folder(
     dev = get_device(device)
     model = YOLO(weights)
     rows = []
-    for idx, fp in enumerate(frames, start=1):
-        res = model.track(
-            str(fp),
-            classes=list(classes),
-            conf=conf,
-            imgsz=imgsz,
-            tracker=tracker,
-            persist=(idx > 1),
-            device=dev,
-            verbose=False,
-        )
-        b = res[0].boxes
-        if b is not None and b.id is not None:
-            xywh = b.xywh.cpu().numpy()
-            ids = b.id.cpu().numpy()
-            confs = b.conf.cpu().numpy()
-            for (cx, cy, bw, bh), tid, cf in zip(xywh, ids, confs):
-                rows.append((idx, int(tid), cx - bw / 2, cy - bh / 2, bw, bh, float(cf)))
+    results = model.track(
+        source=str(img_dir),
+        classes=list(classes),
+        conf=conf,
+        imgsz=imgsz,
+        tracker=tracker,
+        persist=True,
+        stream=True,
+        device=dev,
+        verbose=False,
+    )
+    for r in results:
+        digits = "".join(c for c in Path(r.path).stem if c.isdigit())
+        if not digits:
+            continue
+        fr = int(digits)
+        b = r.boxes
+        if b is None or b.id is None:
+            continue
+        xywh = b.xywh.cpu().numpy()
+        ids = b.id.cpu().numpy()
+        confs = b.conf.cpu().numpy()
+        for (cx, cy, bw, bh), tid, cf in zip(xywh, ids, confs):
+            rows.append((fr, int(tid), cx - bw / 2, cy - bh / 2, bw, bh, float(cf)))
     return rows, len(frames)
