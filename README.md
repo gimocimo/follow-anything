@@ -20,7 +20,7 @@ Given ordinary football broadcast video, `pitch-vision` aims to:
 | Rung | Milestone | Key deliverable | Status |
 |---|---|---|---|
 | 1 | Baseline tracking | YOLO11n + BoT-SORT → **bbox-HOTA 0.481** on a held-out game (SN-GSR-2025) | ✅ |
-| 2 | Promptable | SAM 2 "click-a-player, follow them" | ⬜ |
+| 2 | Promptable | SAM 2 "click-a-player, follow them" | ✅ demo |
 | 3 | Robust | occlusion + ball + re-ID; beat baseline HOTA | ⬜ |
 | 4 | Permanence | re-acquire IDs across camera cuts | ⬜ |
 | 5 | Real-time | distil / export to live FPS | ⬜ |
@@ -34,6 +34,8 @@ Given ordinary football broadcast video, `pitch-vision` aims to:
 | **0.481** | 0.611 | 0.381 | 0.734 | 0.541 | 2339 |
 
 Association (AssA) is the weaker half — the target for the next rungs. SoccerNet's official metric is GS-HOTA over pitch coordinates (the rung-6 flagship).
+
+**Rung 2 — promptable demo** (`scripts/07_promptable_demo.py`): give one player a click/box on the first frame and SAM 2 propagates the mask through the clip, rendering a *spotlight-that-player* video. Runs on Apple MPS; tracked the prompted player in 72/90 frames of a test clip.
 
 ## What makes it rigorous (not a tutorial)
 - **Match-disjoint splits** — no frames from the same match ever appear in both train and test (`pitchvision.data.splits`). Naive frame-level splits leak near-duplicate frames and inflate metrics; we refuse to do that.
