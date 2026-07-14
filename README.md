@@ -97,7 +97,8 @@ python scripts/06_gsr_baseline_eval.py --split test   # baseline HOTA + provenan
 ```bash
 python scripts/01_download_gsr.py --split valid
 python scripts/05_gsr_make_splits.py --source-split valid --out outputs/gsr_splits_final.json
-python scripts/06_gsr_baseline_eval.py --splits-file outputs/gsr_splits_final.json --split test
+python scripts/06_gsr_baseline_eval.py --splits-file outputs/gsr_splits_final.json --split test \
+  --out-dir outputs/gsr_baseline_final   # keep the dev run's outputs/gsr_baseline intact
 ```
 Committed provenance for both numbers: [`results/rung1_baseline.json`](results/rung1_baseline.json). The pipeline itself is data-agnostic.
 
