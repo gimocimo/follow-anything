@@ -1,0 +1,105 @@
+{
+  "note": "Portable Rung-1 provenance (portable = no absolute/per-clip paths). Data: SoccerNet SN-GSR-2025 (gated HF). dev = train game 4 (development benchmark); final = valid game 2 (untouched, sealed one-shot).",
+  "dev": {
+    "role": "development",
+    "n_seqs": 18,
+    "metrics": {
+      "HOTA": 0.4814830134807477,
+      "DetA": 0.6105490012777313,
+      "AssA": 0.38110807291156645,
+      "MOTA": 0.7343667582525724,
+      "IDF1": 0.540621517144435,
+      "IDSW": 2339
+    },
+    "game_assignment": {
+      "4": "test",
+      "6": "val",
+      "9": "train"
+    },
+    "gt_category_counts": {
+      "player": 212984,
+      "goalkeeper": 6881,
+      "referee": 20395,
+      "ball": 12599,
+      "other": 1183
+    },
+    "git_sha": "d565ce5837b904e559cdaea3dc60df6d9587ff47",
+    "python": "3.12.13",
+    "device_used": "mps",
+    "packages": {
+      "torch": "2.13.0",
+      "torchvision": "0.28.0",
+      "ultralytics": "8.4.93",
+      "numpy": "2.5.1",
+      "opencv-python": "5.0.0.93",
+      "scipy": "1.18.0",
+      "trackeval": "1.0.dev1",
+      "lap": "0.5.13"
+    },
+    "detector": {
+      "weights": "yolo11n.pt",
+      "sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
+      "imgsz": 1280,
+      "conf": 0.25,
+      "classes": "COCO person(0) + sports_ball(32)"
+    },
+    "tracker": {
+      "requested": "botsort.yaml",
+      "resolved": "configs/trackers/botsort.yaml",
+      "sha256": "8cd88930d3be5557be0777f384eecff0a36a7011850fe613fc0a68178bfd5b01"
+    },
+    "category_policy": "all object categories (player/GK/referee/ball + other); see src/pitchvision/data/gsr.py",
+    "eval": "bbox-HOTA via TrackEval (commit-pinned; see requirements.lock)"
+  },
+  "final": {
+    "role": "final",
+    "n_seqs": 18,
+    "metrics": {
+      "HOTA": 0.49209979323992903,
+      "DetA": 0.6024369062446032,
+      "AssA": 0.40334919925433427,
+      "MOTA": 0.7135521460107372,
+      "IDF1": 0.5505529575483992,
+      "IDSW": 1869
+    },
+    "game_assignment": {
+      "2": "test",
+      "3": "val",
+      "5": "train"
+    },
+    "gt_category_counts": {
+      "player": 172666,
+      "goalkeeper": 9070,
+      "referee": 15424,
+      "ball": 12179,
+      "other": 399
+    },
+    "git_sha": "d565ce5837b904e559cdaea3dc60df6d9587ff47",
+    "python": "3.12.13",
+    "device_used": "mps",
+    "packages": {
+      "torch": "2.13.0",
+      "torchvision": "0.28.0",
+      "ultralytics": "8.4.93",
+      "numpy": "2.5.1",
+      "opencv-python": "5.0.0.93",
+      "scipy": "1.18.0",
+      "trackeval": "1.0.dev1",
+      "lap": "0.5.13"
+    },
+    "detector": {
+      "weights": "yolo11n.pt",
+      "sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
+      "imgsz": 1280,
+      "conf": 0.25,
+      "classes": "COCO person(0) + sports_ball(32)"
+    },
+    "tracker": {
+      "requested": "botsort.yaml",
+      "resolved": "configs/trackers/botsort.yaml",
+      "sha256": "8cd88930d3be5557be0777f384eecff0a36a7011850fe613fc0a68178bfd5b01"
+    },
+    "category_policy": "all object categories (player/GK/referee/ball + other); see src/pitchvision/data/gsr.py",
+    "eval": "bbox-HOTA via TrackEval (commit-pinned; see requirements.lock)"
+  }
+}
