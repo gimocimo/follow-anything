@@ -19,12 +19,21 @@ Given ordinary football broadcast video, `pitch-vision` aims to:
 ## Roadmap
 | Rung | Milestone | Key deliverable | Status |
 |---|---|---|---|
-| 1 | Baseline tracking | YOLO + ByteTrack/BoT-SORT, HOTA on SoccerNet | 🟡 in progress |
+| 1 | Baseline tracking | YOLO11n + BoT-SORT → **bbox-HOTA 0.481** on a held-out game (SN-GSR-2025) | ✅ |
 | 2 | Promptable | SAM 2 "click-a-player, follow them" | ⬜ |
 | 3 | Robust | occlusion + ball + re-ID; beat baseline HOTA | ⬜ |
 | 4 | Permanence | re-acquire IDs across camera cuts | ⬜ |
 | 5 | Real-time | distil / export to live FPS | ⬜ |
 | 6 | 3D replay | homography top-down → depth-lifted 3D | ⬜ |
+
+## Results
+**Rung 1 — zero-shot baseline** (YOLO11n + BoT-SORT, no training) on the held-out game (leave-one-game-out over SN-GSR-2025 `train`, 18 clips), scored with bbox-HOTA via TrackEval:
+
+| HOTA | DetA | AssA | MOTA | IDF1 | IDSW |
+|---|---|---|---|---|---|
+| **0.481** | 0.611 | 0.381 | 0.734 | 0.541 | 2339 |
+
+Association (AssA) is the weaker half — the target for the next rungs. SoccerNet's official metric is GS-HOTA over pitch coordinates (the rung-6 flagship).
 
 ## What makes it rigorous (not a tutorial)
 - **Match-disjoint splits** — no frames from the same match ever appear in both train and test (`pitchvision.data.splits`). Naive frame-level splits leak near-duplicate frames and inflate metrics; we refuse to do that.
