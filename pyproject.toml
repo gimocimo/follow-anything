@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+# Plain `pytest` discovers the tests/ suite AND the metric self-test in scripts/.
+testpaths = ["tests", "scripts"]
+python_files = ["test_*.py", "*_selftest.py"]

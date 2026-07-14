@@ -28,7 +28,7 @@ A rung is "done" only when its **gate** is met *and verified* (by us + a Codex a
 |---|---|---|---|
 | 1 | **Baseline + measurement foundation** | Leak-free game-disjoint split; HOTA/MOTA/IDF1 via TrackEval, unit-tested to *exact* values; a reproducible (provenance-stamped) zero-shot baseline confirmed on an untouched final set | ✅ **done** — dev 0.481 / **untouched-final 0.492** (§7) |
 | 2 | **Promptable "click, follow"** | A working spotlight video from a single click/box prompt on real football (SAM 2 mask propagation) | ✅ done (demo) |
-| 3 | **Robust** | HOTA **> 0.481** confirmed on the *untouched* final set (official `valid` split), tuned only on the dev benchmark (game 4); write up *what* moved it; occlusion/re-ID/ball measured (AssA ↑, IDSW ↓) | ⬜ |
+| 3 | **Robust** | Beat the *matched-set* baseline on the **sealed** final set — HOTA **> 0.492** on `valid` game 2 (identical eval) **and** dev HOTA **> 0.481** on game 4; write up *what* moved it; occlusion/re-ID/ball measured (AssA ↑, IDSW ↓) | ⬜ |
 | 4 | **Permanence** | A benchmark of ID consistency across shot cuts/viewpoints + a method that measurably improves it vs. Rung 3 | ⬜ |
 | 5 | **Real-time / on-device** (novelty focus) | An **accuracy (HOTA/IoU) vs latency (fps) Pareto** on our data + target hardware, with an exported runtime (CoreML/ONNX/TensorRT) and ≥1 point improving on off-the-shelf efficient variants (EdgeSAM/EdgeTAM/EfficientTAM lineage) | ⬜ |
 | 6 | **3D tactical replay** (flagship) | Pitch homography → top-down minimap → depth-lifted 3D; a demo from a *single* broadcast camera | ⬜ |

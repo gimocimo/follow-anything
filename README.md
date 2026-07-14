@@ -93,7 +93,13 @@ python scripts/01_download_gsr.py --split train       # dev source (has labels)
 python scripts/05_gsr_make_splits.py                  # leave-one-game-out split (fail-closed)
 python scripts/06_gsr_baseline_eval.py --split test   # baseline HOTA + provenance manifest
 ```
-`train` is the development source; the official `valid` split is the untouched final-confirmation set (`--split valid`). The pipeline itself is data-agnostic.
+`train` is the development source. The untouched **final-confirmation** number uses the official `valid` split:
+```bash
+python scripts/01_download_gsr.py --split valid
+python scripts/05_gsr_make_splits.py --source-split valid --out outputs/gsr_splits_final.json
+python scripts/06_gsr_baseline_eval.py --splits-file outputs/gsr_splits_final.json --split test
+```
+Committed provenance for both numbers: [`results/rung1_baseline.json`](results/rung1_baseline.json). The pipeline itself is data-agnostic.
 
 ## Credits & licenses
 Ultralytics YOLO (**AGPL-3.0** — review before redistribution), SAM 2 (Apache-2.0), TrackEval (MIT), SoccerNet (research license). Check each before publishing derivatives.

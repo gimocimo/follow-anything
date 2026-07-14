@@ -14,10 +14,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install evaluation deps
+      - name: Install test deps
         run: |
           python -m pip install --upgrade pip
-          pip install numpy scipy pytest \
+          pip install numpy scipy pytest pyyaml tabulate opencv-python-headless \
             "TrackEval @ git+https://github.com/JonathonLuiten/TrackEval.git@12c8791b303e0a0b50f753af204249e622d0281a"
-      - name: Metric + tracker-persistence tests
-        run: pytest -q tests/ scripts/02_eval_selftest.py
+      - name: Tests (metric harness, splits, tracker persistence + production path)
+        run: pytest -q

@@ -61,7 +61,9 @@ def _git_sha():
 
 
 def build_manifest(args, device, weights, splits_meta, category_counts):
+    from pitchvision.pipeline.run_video import _resolve_tracker
     wp = Path(weights)
+    resolved_tracker = _resolve_tracker(args.tracker)
     return {
         "git_sha": _git_sha(),
         "python": platform.python_version(),
@@ -72,7 +74,8 @@ def build_manifest(args, device, weights, splits_meta, category_counts):
         "detector": {"weights": str(wp), "sha256": _sha256(wp) if wp.exists() else None,
                      "imgsz": args.imgsz, "conf": args.conf,
                      "classes": "COCO person(0) + sports_ball(32)"},
-        "tracker_cfg": args.tracker,
+        "tracker": {"requested": args.tracker, "resolved": resolved_tracker,
+                    "sha256": _sha256(Path(resolved_tracker)) if Path(resolved_tracker).exists() else None},
         "category_policy": "all object categories (player/GK/referee/ball + other); see src/pitchvision/data/gsr.py",
         "gt_category_counts": category_counts,
         "split": {"file": str(args.splits_file), "name": args.split, "meta": splits_meta},

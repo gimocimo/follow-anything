@@ -21,27 +21,11 @@ produced an empty test set).
 import argparse
 import json
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pitchvision.data.gsr import index_gsr_sequences
-
-
-def leave_one_game_out(seqs):
-    by_game = defaultdict(list)
-    for s in seqs:
-        by_game[s["game_id"]].append(s)
-    games = sorted(by_game)  # deterministic ordering by game_id
-    if len(games) < 3:
-        sys.exit(f"leave-one-game-out needs >= 3 games; found {len(games)}: {games}")
-    assign = {games[0]: "test", games[1]: "val"}
-    for g in games[2:]:
-        assign[g] = "train"
-    out = {"train": [], "val": [], "test": []}
-    for g, members in by_game.items():
-        out[assign[g]].extend(members)
-    return out, {g: assign[g] for g in games}
+from pitchvision.data.splits import leave_one_game_out
 
 
 def main():
@@ -56,11 +40,13 @@ def main():
     if not seqs:
         sys.exit(f"No GSR sequences under {args.data_dir} (split={args.source_split}). Extract the data first.")
 
-    splits, assignment = leave_one_game_out(seqs)
+    # also require every clip to actually contain frames (not just be listed)
+    empty_clips = [s["name"] for s in seqs if not s["length"]]
+    if empty_clips:
+        sys.exit(f"Refusing to split: {len(empty_clips)} clip(s) have zero frames: {empty_clips[:5]}")
 
-    empty = [k for k in ("train", "val", "test") if not splits[k]]
-    if empty:
-        sys.exit(f"Refusing to write: empty required split(s) {empty}. game->split = {assignment}")
+    splits, assignment = leave_one_game_out(seqs, group_key=lambda s: s["game_id"])
+    # leave_one_game_out already guarantees non-empty train/val/test (raises otherwise)
 
     print(f"{len(seqs)} clips | games {sorted({s['game_id'] for s in seqs})} | policy=leave-one-game-out")
     print(f"game -> split: {assignment}")

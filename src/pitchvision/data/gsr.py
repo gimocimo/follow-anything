@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 _SPLITS = ("train", "valid", "test", "challenge")
+_OBJECT_CATS = frozenset({1, 2, 3, 4, 7})  # player, goalkeeper, referee, ball, other (tracked)
 
 
 def _frame_index(img: dict) -> Optional[int]:
@@ -76,12 +77,16 @@ def gsr_to_mot_rows(labels_json, keep_categories: Optional[Iterable[int]] = None
     keep = set(keep_categories) if keep_categories is not None else None
     rows, seen = [], set()
     for ann in data.get("annotations", []):
-        if keep is not None and ann.get("category_id") not in keep:
+        cat = ann.get("category_id")
+        if keep is not None and cat not in keep:
             continue
         tid = ann.get("track_id")
         box = _bbox_xywh(ann)
         if tid is None or box is None:
-            continue  # not a boxed + tracked object row
+            if strict and cat in _OBJECT_CATS:
+                raise ValueError(f"{labels_json}: object ann {ann.get('id')} (cat {cat}) missing "
+                                 f"{'track_id' if tid is None else 'bbox'}")
+            continue  # non-object row (pitch/camera) — no track_id/bbox by design
         fr = frame_of.get(ann.get("image_id"))
         if fr is None:
             if strict:
@@ -89,6 +94,8 @@ def gsr_to_mot_rows(labels_json, keep_categories: Optional[Iterable[int]] = None
                                  f"has no frame for image_id {ann.get('image_id')}")
             continue
         if strict:
+            if float(tid) != int(tid):
+                raise ValueError(f"{labels_json}: non-integral track_id {tid!r} (frame {fr})")
             if not all(map(math.isfinite, box)) or box[2] <= 0 or box[3] <= 0:
                 raise ValueError(f"{labels_json}: invalid box {box} (frame {fr}, id {tid})")
             key = (fr, int(tid))

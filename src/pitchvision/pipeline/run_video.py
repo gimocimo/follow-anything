@@ -135,7 +135,7 @@ def run_image_folder(
         classes=list(classes),
         conf=conf,
         imgsz=imgsz,
-        tracker=tracker,
+        tracker=_resolve_tracker(tracker),
         persist=True,
         stream=True,
         device=dev,

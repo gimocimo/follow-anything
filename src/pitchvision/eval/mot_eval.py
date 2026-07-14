@@ -86,6 +86,7 @@ def evaluate(
     eval_config = {
         **trackeval.Evaluator.get_default_eval_config(),
         "USE_PARALLEL": False,
+        "LOG_ON_ERROR": None,  # don't write a fixed error_log.txt (read-only dirs mask the real error)
         "PRINT_CONFIG": False,
         "PRINT_RESULTS": False,
         "TIME_PROGRESS": False,
