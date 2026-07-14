@@ -14,6 +14,17 @@ import cv2
 from ..config import get_device
 
 
+def _resolve_tracker(tracker: str) -> str:
+    """Prefer the repo's vendored, version-pinned tracker config over the one
+    bundled with ultralytics, so tracker behaviour is reproducible across
+    ultralytics versions."""
+    if tracker in ("botsort.yaml", "bytetrack.yaml"):
+        vendored = Path(__file__).resolve().parents[3] / "configs" / "trackers" / Path(tracker).name
+        if vendored.exists():
+            return str(vendored)
+    return tracker
+
+
 def run_video(
     video: str,
     weights: str = "yolo11n.pt",
@@ -49,7 +60,7 @@ def run_video(
             classes=list(classes),
             conf=conf,
             imgsz=imgsz,
-            tracker=tracker,
+            tracker=_resolve_tracker(tracker),
             persist=True,
             stream=True,
             device=dev,

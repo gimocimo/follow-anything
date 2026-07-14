@@ -50,6 +50,8 @@ def write_gt(gt_folder: Union[str, Path], seq: str, rows: Iterable[Row]) -> Path
     path = out / "gt.txt"
     with open(path, "w") as f:
         for fr, i, x, y, w, h in rows:
+            if fr != int(fr) or i != int(i):
+                raise ValueError(f"non-integral frame/id in GT: ({fr}, {i})")
             f.write(f"{int(fr)},{int(i)},{x},{y},{w},{h},1,1,1\n")
     return path
 
@@ -64,6 +66,8 @@ def write_tracker(
     with open(path, "w") as f:
         for r in rows:
             fr, i, x, y, w, h = r[:6]
+            if fr != int(fr) or i != int(i):
+                raise ValueError(f"non-integral frame/id in predictions: ({fr}, {i})")
             conf = r[6] if len(r) > 6 else 1.0
             f.write(f"{int(fr)},{int(i)},{x},{y},{w},{h},{conf},-1,-1,-1\n")
     return path

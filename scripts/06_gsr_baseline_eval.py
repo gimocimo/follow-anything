@@ -118,7 +118,7 @@ def main():
                 imgsz=args.imgsz, tracker=args.tracker, device=args.device,
             )
             write_tracker(pred_dir, TRACKER, name, rows)
-            write_gt(gt_tmp, name, gsr_to_mot_rows(s["labels"]))
+            write_gt(gt_tmp, name, gsr_to_mot_rows(s["labels"], strict=True))
             for cn, cv in gsr_category_counts(s["labels"]).items():
                 cat_counts[cn] += cv
             seq_lengths[name] = max(nframes, s.get("length") or nframes)

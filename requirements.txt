@@ -16,6 +16,7 @@ tqdm>=4.66
 scipy>=1.11
 TrackEval @ git+https://github.com/JonathonLuiten/TrackEval.git@12c8791b303e0a0b50f753af204249e622d0281a
 pytest>=8.0               # metric self-test / CI
+tabulate>=0.9             # optional TrackEval dep (silences its BURST import warning)
 
 # Data (Rung 1) — SoccerNet SN-GSR-2025 via Hugging Face (gated)
 huggingface_hub>=0.24

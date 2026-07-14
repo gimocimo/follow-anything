@@ -51,13 +51,20 @@ def _bbox_xywh(ann: dict):
     return None
 
 
-def gsr_to_mot_rows(labels_json, keep_categories: Optional[Iterable[int]] = None) -> list:
+def gsr_to_mot_rows(labels_json, keep_categories: Optional[Iterable[int]] = None,
+                    strict: bool = False) -> list:
     """Convert a Labels-GameState.json to MOT rows [(frame, id, x, y, w, h)].
 
     Includes every annotation with a track id and an image bbox. By default ALL
     object categories are kept (see CATEGORY POLICY above); pass
     `keep_categories={1,2,3,4}` to restrict to player/GK/referee/ball.
+
+    With `strict=True` (used for gate-producing GT) it fails closed instead of
+    silently skipping: an object annotation (track_id + bbox) whose image_id has
+    no frame, a non-finite / non-positive box, or a duplicate (frame, id) raises.
     """
+    import math
+
     data = json.loads(Path(labels_json).read_text())
     frame_of = {}
     for img in data.get("images", []):
@@ -67,15 +74,27 @@ def gsr_to_mot_rows(labels_json, keep_categories: Optional[Iterable[int]] = None
             frame_of[iid] = fr
 
     keep = set(keep_categories) if keep_categories is not None else None
-    rows = []
+    rows, seen = [], set()
     for ann in data.get("annotations", []):
         if keep is not None and ann.get("category_id") not in keep:
             continue
-        fr = frame_of.get(ann.get("image_id"))
         tid = ann.get("track_id")
         box = _bbox_xywh(ann)
-        if fr is None or tid is None or box is None:
+        if tid is None or box is None:
+            continue  # not a boxed + tracked object row
+        fr = frame_of.get(ann.get("image_id"))
+        if fr is None:
+            if strict:
+                raise ValueError(f"{labels_json}: ann {ann.get('id')} (track {tid}) "
+                                 f"has no frame for image_id {ann.get('image_id')}")
             continue
+        if strict:
+            if not all(map(math.isfinite, box)) or box[2] <= 0 or box[3] <= 0:
+                raise ValueError(f"{labels_json}: invalid box {box} (frame {fr}, id {tid})")
+            key = (fr, int(tid))
+            if key in seen:
+                raise ValueError(f"{labels_json}: duplicate (frame,id)={key}")
+            seen.add(key)
         rows.append((fr, int(tid), *box))
     rows.sort(key=lambda r: (r[0], r[1]))
     return rows

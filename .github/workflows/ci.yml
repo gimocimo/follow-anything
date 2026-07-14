@@ -19,5 +19,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy scipy pytest \
             "TrackEval @ git+https://github.com/JonathonLuiten/TrackEval.git@12c8791b303e0a0b50f753af204249e622d0281a"
-      - name: Metric harness self-test (exact values)
-        run: pytest -q scripts/02_eval_selftest.py
+      - name: Metric + tracker-persistence tests
+        run: pytest -q tests/ scripts/02_eval_selftest.py
