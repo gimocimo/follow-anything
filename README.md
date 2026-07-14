@@ -30,6 +30,8 @@ Given ordinary video, `follow-anything` aims to:
 | 5 | Real-time / on-device — distil to live FPS | ⬜ |
 | 6 | 3D tactical replay — homography top-down → depth-lifted 3D | ⬜ |
 
+> Full scope, invariants, and per-rung definition-of-done: **[docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)**.
+
 ## Results
 **Rung 1 — zero-shot baseline** (YOLO11n + BoT-SORT, no training) on a held-out game (leave-one-game-out over SoccerNet **SN-GSR-2025** `train`, 18 clips), scored with bbox-HOTA via TrackEval:
 
