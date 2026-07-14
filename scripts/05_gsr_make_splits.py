@@ -1,66 +1,87 @@
 #!/usr/bin/env python3
-"""Match-disjoint train/val/test split over SN-GSR-2025 clips.
+"""Build a COMMITTED, reproducible, match-disjoint split over SN-GSR-2025 clips.
 
-Clips are grouped by source game (`info.game_id` in each Labels-GameState.json)
-so clips from the same match never straddle a split boundary — genuine
-match-level grouping (not a per-clip fallback), exactly the rigor we insisted on
-after the microrobot leakage.
+Policy: **leave-one-game-out**, deterministic and explicit — no ratios or seeds.
+With games sorted by id, test = the first game, val = the second, train = the rest.
+For the downloaded `train` games (ids 4, 6, 9) this yields the committed split
+**train=game9, val=game6, test=game4**.
+
+Roles (PROJECT_PLAN §4): game 4 (the `train`-source split's "test") is the
+**development benchmark** — it has been inspected during development. The
+**untouched final-confirmation set** is the official `valid` split; build it with
+`--source-split valid` once downloaded.
+
+Fails closed: requires `info.game_id` on every clip (no silent fallback grouping),
+and refuses to emit an empty required split (the old 70/15/15 ratio default
+produced an empty test set).
 
     python scripts/05_gsr_make_splits.py --data-dir data/soccernet-gsr
+    python scripts/05_gsr_make_splits.py --source-split valid --out outputs/gsr_splits_final.json
 """
 import argparse
 import json
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pitchvision.data.gsr import index_gsr_sequences
-from pitchvision.data.splits import group_disjoint_split, summarize_splits
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+def leave_one_game_out(seqs):
+    by_game = defaultdict(list)
+    for s in seqs:
+        by_game[s["game_id"]].append(s)
+    games = sorted(by_game)  # deterministic ordering by game_id
+    if len(games) < 3:
+        sys.exit(f"leave-one-game-out needs >= 3 games; found {len(games)}: {games}")
+    assign = {games[0]: "test", games[1]: "val"}
+    for g in games[2:]:
+        assign[g] = "train"
+    out = {"train": [], "val": [], "test": []}
+    for g, members in by_game.items():
+        out[assign[g]].extend(members)
+    return out, {g: assign[g] for g in games}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", default="data/soccernet-gsr")
-    ap.add_argument("--split", default="train", help="GSR split to carve up (train has labels)")
-    ap.add_argument("--ratios", type=float, nargs=3, default=[0.7, 0.15, 0.15],
-                    metavar=("TRAIN", "VAL", "TEST"))
-    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--source-split", default="train", choices=["train", "valid", "test"],
+                    help="which downloaded GSR split to partition (leave-one-game-out)")
     ap.add_argument("--out", default="outputs/gsr_splits.json")
     args = ap.parse_args()
 
-    seqs = index_gsr_sequences(args.data_dir, split=args.split)
+    seqs = index_gsr_sequences(args.data_dir, split=args.source_split, require_game_id=True)
     if not seqs:
-        sys.exit(f"No GSR sequences under {args.data_dir} (split={args.split}). "
-                 f"Extract train.zip first.")
+        sys.exit(f"No GSR sequences under {args.data_dir} (split={args.source_split}). Extract the data first.")
 
-    n_games = len({s["match_id"] for s in seqs})
-    fallback = n_games == len(seqs)
-    print(f"{len(seqs)} clips | {n_games} game(s) | "
-          f"{'PER-CLIP fallback (no game_id!)' if fallback else 'grouped by game_id'}")
-    print(f"total frames: {sum(s['length'] for s in seqs)}")
+    splits, assignment = leave_one_game_out(seqs)
 
-    splits = group_disjoint_split(
-        seqs, group_key=lambda s: s["match_id"], ratios=tuple(args.ratios), seed=args.seed
-    )
-    print("split sizes ->", summarize_splits(splits))
-    for name, items in splits.items():
-        print(f"  {name}: {len(items)} clips from games {sorted({s['match_id'] for s in items})}")
+    empty = [k for k in ("train", "val", "test") if not splits[k]]
+    if empty:
+        sys.exit(f"Refusing to write: empty required split(s) {empty}. game->split = {assignment}")
 
+    print(f"{len(seqs)} clips | games {sorted({s['game_id'] for s in seqs})} | policy=leave-one-game-out")
+    print(f"game -> split: {assignment}")
+    for name in ("train", "val", "test"):
+        games = sorted({s["game_id"] for s in splits[name]})
+        print(f"  {name}: {len(splits[name])} clips from game(s) {games}")
+
+    role = "development" if args.source_split == "train" else "final"
     payload = {
-        "meta": {"data_dir": args.data_dir, "source_split": args.split,
-                 "ratios": args.ratios, "seed": args.seed,
-                 "grouping": "per_clip_fallback" if fallback else "by_game_id"},
-        **{name: [{"name": s["name"], "match_id": s["match_id"], "length": s["length"],
-                   "path": s["path"], "labels": s["labels"]} for s in items]
+        "meta": {"data_dir": args.data_dir, "source_split": args.source_split,
+                 "policy": "leave-one-game-out", "game_assignment": assignment,
+                 "role": role, "grouping": "info.game_id (required)"},
+        **{name: [{"name": s["name"], "game_id": s["game_id"], "match_id": s["match_id"],
+                   "length": s["length"], "path": s["path"], "labels": s["labels"]}
+                  for s in items]
            for name, items in splits.items()},
     }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2))
-    print(f"wrote {out}")
-    print("Next: python scripts/06_gsr_baseline_eval.py --split test --max-seqs 3")
+    print(f"wrote {out}  (role={role})")
 
 
 if __name__ == "__main__":

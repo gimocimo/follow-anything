@@ -1,26 +1,27 @@
-# pitch-vision — core dependencies (Phase 0–1). Requires Python 3.10+.
-#
-# Install PyTorch SEPARATELY for your platform first:
-#   https://pytorch.org/get-started/locally/
-#   macOS (Apple Silicon):   pip install torch torchvision
-#   CUDA 12.x (Linux GPU):    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# follow-anything — dependencies (human-readable intent). Requires Python 3.10+.
+# Exact frozen versions live in requirements.lock (generated via `uv pip freeze`).
+# Install PyTorch separately for your platform first — https://pytorch.org/get-started/locally/
+#   macOS (Apple Silicon):  pip install torch torchvision
+#   CUDA 12.x (Linux GPU):   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 
-ultralytics>=8.3.0      # YOLO detector + built-in ByteTrack / BoT-SORT tracking
-lap>=0.5.12             # linear assignment — required by ByteTrack / BoT-SORT
+# Detection + tracking (Rungs 1, 3)
+ultralytics>=8.3.0        # YOLO + built-in ByteTrack / BoT-SORT
+lap>=0.5.12               # linear assignment for the trackers
 opencv-python>=4.9
 numpy>=1.24
 pyyaml>=6.0
 tqdm>=4.66
 
-# Evaluation (Rung 1)
+# Evaluation (Rung 1) — TrackEval pinned to a commit for reproducibility
 scipy>=1.11
-git+https://github.com/JonathonLuiten/TrackEval.git             # HOTA / MOTA / IDF1
+TrackEval @ git+https://github.com/JonathonLuiten/TrackEval.git@12c8791b303e0a0b50f753af204249e622d0281a
+pytest>=8.0               # metric self-test / CI
 
-# Data (Rung 1)
-SoccerNet>=0.1.60                                               # SoccerNet-Tracking downloader
+# Data (Rung 1) — SoccerNet SN-GSR-2025 via Hugging Face (gated)
+huggingface_hub>=0.24
 
-# Promptable (Rung 2) — on non-CUDA machines build with SAM2_BUILD_CUDA=0
-sam-2 @ git+https://github.com/facebookresearch/sam2.git
+# Promptable (Rung 2) — pinned; on non-CUDA machines build with SAM2_BUILD_CUDA=0
+sam-2 @ git+https://github.com/facebookresearch/sam2.git@2b90b9f5ceec907a1c18123530e92e794ad901a4
 
 # --- Phase 3+ (uncomment when reached) ---
-# boxmot>=11.0                                                     # standalone trackers + re-ID (BoT-SORT, OC-SORT, StrongSORT)
+# boxmot>=11.0            # standalone trackers + re-ID (BoT-SORT, OC-SORT, StrongSORT)

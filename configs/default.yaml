@@ -1,11 +1,11 @@
-# pitch-vision default configuration
+# follow-anything default configuration (reference; scripts currently take these as CLI args)
 seed: 42
 device: auto            # auto | cuda | mps | cpu
 
 paths:
   data_dir: data
   outputs_dir: outputs
-  soccernet_dir: data/soccernet
+  gsr_dir: data/soccernet-gsr
 
 detector:
   weights: yolo11n.pt   # COCO-pretrained; person=0, sports ball=32
@@ -17,9 +17,8 @@ tracker:
   name: botsort         # ultralytics built-in: botsort | bytetrack
 
 split:
-  policy: match_disjoint
-  ratios: [0.7, 0.15, 0.15]   # train / val / test
-  group_key: match_id         # whole matches never cross splits
+  policy: leave_one_game_out  # deterministic: test/val/train = 1st/2nd/rest game by id
+  group_key: game_id          # required; whole games never cross splits (fail-closed)
 
 eval:
   metrics: [HOTA, MOTA, IDF1]

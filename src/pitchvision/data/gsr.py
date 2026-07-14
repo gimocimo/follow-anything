@@ -9,32 +9,36 @@ Each sequence directory contains:
 Labels-GameState.json is a COCO-like dict:
     images:      [{image_id, file_name, height, width, ...}]
     annotations: [{image_id, track_id, category_id, bbox_image:{x,y,w,h,...}, ...}]
-    categories:  [{id, name}]   # player, goalkeeper, referee, ball, ...
+    categories:  [{id, name}]   # 1 player, 2 goalkeeper, 3 referee, 4 ball, 5 pitch, 6 camera, 7 other
 
-For a *tracking* baseline we use the IMAGE bboxes + track ids and score standard
-(bbox-IoU) HOTA. NB: SoccerNet's official GSR metric is GS-HOTA over *pitch*
-coordinates — that's the flagship (rung 6) target, not this bbox baseline.
+CATEGORY POLICY (decided 2026-07-13, logged in PROJECT_PLAN §7): the tracking
+baseline includes EVERY annotation that has a track_id AND an image bbox — i.e.
+categories 1-4 (player / GK / referee / ball) AND category 7 ("other" people such
+as staff). Non-object rows (pitch, camera) carry no track_id/bbox and are excluded.
+This keeps one class-agnostic score matching our un-classed tracker output; use
+`gsr_category_counts` for per-class diagnostics, or `keep_categories={1,2,3,4}` to
+restrict. The published baseline (HOTA 0.481) is over ALL object categories.
 
-These parsers are defensive about exact key names; verify against a real file
-once the data is downloaded (see scripts/05_inspect_gsr.py).
+We score standard (bbox-IoU) HOTA. SoccerNet's official GSR metric is GS-HOTA over
+*pitch* coordinates — the flagship (rung 6) target, not this bbox baseline.
 """
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
-from typing import Optional, Union
+from typing import Iterable, Optional
 
 _SPLITS = ("train", "valid", "test", "challenge")
 
 
 def _frame_index(img: dict) -> Optional[int]:
     fn = img.get("file_name") or img.get("filename") or ""
-    digits = "".join(ch for ch in Path(fn).stem if ch.isdigit())
+    digits = "".join(c for c in Path(fn).stem if c.isdigit())
     return int(digits) if digits else None
 
 
 def _bbox_xywh(ann: dict):
-    """Return top-left (x, y, w, h) from a GSR annotation, or None."""
     b = ann.get("bbox_image") or ann.get("bbox")
     if isinstance(b, dict):
         if all(k in b for k in ("x", "y", "w", "h")):
@@ -47,11 +51,12 @@ def _bbox_xywh(ann: dict):
     return None
 
 
-def gsr_to_mot_rows(labels_json: Union[str, Path]) -> list:
+def gsr_to_mot_rows(labels_json, keep_categories: Optional[Iterable[int]] = None) -> list:
     """Convert a Labels-GameState.json to MOT rows [(frame, id, x, y, w, h)].
 
-    Includes every annotation with a track id and an image bbox (players,
-    goalkeepers, referees, ball — lumped, matching our un-classed tracker).
+    Includes every annotation with a track id and an image bbox. By default ALL
+    object categories are kept (see CATEGORY POLICY above); pass
+    `keep_categories={1,2,3,4}` to restrict to player/GK/referee/ball.
     """
     data = json.loads(Path(labels_json).read_text())
     frame_of = {}
@@ -61,8 +66,11 @@ def gsr_to_mot_rows(labels_json: Union[str, Path]) -> list:
         if iid is not None and fr is not None:
             frame_of[iid] = fr
 
+    keep = set(keep_categories) if keep_categories is not None else None
     rows = []
     for ann in data.get("annotations", []):
+        if keep is not None and ann.get("category_id") not in keep:
+            continue
         fr = frame_of.get(ann.get("image_id"))
         tid = ann.get("track_id")
         box = _bbox_xywh(ann)
@@ -73,24 +81,53 @@ def gsr_to_mot_rows(labels_json: Union[str, Path]) -> list:
     return rows
 
 
-def index_gsr_sequences(root: Union[str, Path], split: Optional[str] = None) -> list:
-    """Find GSR sequences (directories containing Labels-GameState.json)."""
+def gsr_category_counts(labels_json) -> dict:
+    """Count boxed + tracked annotations per category name (per-class diagnostics)."""
+    data = json.loads(Path(labels_json).read_text())
+    id_to_name = {c["id"]: c.get("name", str(c["id"])) for c in data.get("categories", [])}
+    counts: Counter = Counter()
+    for ann in data.get("annotations", []):
+        if ann.get("track_id") is not None and _bbox_xywh(ann) is not None:
+            counts[ann.get("category_id")] += 1
+    return {id_to_name.get(cid, str(cid)): n
+            for cid, n in sorted(counts.items(), key=lambda x: (x[0] if x[0] is not None else 0))}
+
+
+def _read_game_id(labels_json: Path) -> Optional[str]:
+    try:
+        info = json.loads(labels_json.read_text()).get("info", {}) or {}
+    except Exception:
+        return None
+    gid = info.get("game_id")
+    return str(gid) if gid not in (None, "") else None
+
+
+def index_gsr_sequences(root, split: Optional[str] = None, require_game_id: bool = False) -> list:
+    """Find GSR sequences (directories containing Labels-GameState.json).
+
+    Each record carries `game_id` (from `info.game_id`, else None) and `match_id`
+    (= game_id, falling back to the sequence name only when game_id is absent).
+    With `require_game_id=True`, raises if any in-scope sequence lacks a game_id —
+    so a gate-producing split can never silently claim game-disjointness on a
+    fallback grouping.
+    """
     root = Path(root)
-    seqs = []
+    seqs, missing = [], []
     for lbl in sorted(root.glob("**/Labels-GameState.json")):
         d = lbl.parent
         sp = next((p for p in d.parts if p in _SPLITS), "unknown")
         if split and sp != split:
             continue
-        try:
-            info = json.loads(lbl.read_text()).get("info", {}) or {}
-        except Exception:
-            info = {}
-        match_id = str(info.get("game_id") or info.get("game")
-                       or info.get("clip") or info.get("id") or d.name)
+        game_id = _read_game_id(lbl)
+        if game_id is None:
+            missing.append(str(lbl))
         n_frames = len(list((d / "img1").glob("*.jpg")))
         seqs.append({
             "name": d.name, "split": sp, "path": str(d), "labels": str(lbl),
-            "length": n_frames, "match_id": match_id,
+            "length": n_frames, "game_id": game_id, "match_id": game_id or d.name,
         })
+    if require_game_id and missing:
+        raise ValueError(
+            f"{len(missing)} sequence(s) missing info.game_id — cannot guarantee a game-disjoint "
+            f"split. Offenders:\n  " + "\n  ".join(missing[:20]))
     return seqs

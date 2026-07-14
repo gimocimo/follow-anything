@@ -26,9 +26,9 @@ A rung is "done" only when its **gate** is met *and verified* (by us + a Codex a
 
 | # | Rung | Gate (measurable definition of done) | Status |
 |---|---|---|---|
-| 1 | **Baseline + measurement foundation** | Leak-free game-disjoint split; HOTA/MOTA/IDF1 via TrackEval, unit-tested to known values; a reproducible zero-shot baseline on a held-out game | ✅ done — **HOTA 0.481** |
+| 1 | **Baseline + measurement foundation** | Leak-free game-disjoint split; HOTA/MOTA/IDF1 via TrackEval, unit-tested to *exact* values; a reproducible (provenance-stamped) zero-shot baseline on a held-out game | 🟡 **hardening** (review = NO; §7) — **HOTA 0.481** |
 | 2 | **Promptable "click, follow"** | A working spotlight video from a single click/box prompt on real football (SAM 2 mask propagation) | ✅ done (demo) |
-| 3 | **Robust** | HOTA on the held-out game **> 0.481**, with a write-up of *what* moved it; occlusion/re-ID/ball handling measured (AssA ↑, IDSW ↓) | ⬜ |
+| 3 | **Robust** | HOTA **> 0.481** confirmed on the *untouched* final set (official `valid` split), tuned only on the dev benchmark (game 4); write up *what* moved it; occlusion/re-ID/ball measured (AssA ↑, IDSW ↓) | ⬜ |
 | 4 | **Permanence** | A benchmark of ID consistency across shot cuts/viewpoints + a method that measurably improves it vs. Rung 3 | ⬜ |
 | 5 | **Real-time / on-device** (novelty focus) | An **accuracy (HOTA/IoU) vs latency (fps) Pareto** on our data + target hardware, with an exported runtime (CoreML/ONNX/TensorRT) and ≥1 point improving on off-the-shelf efficient variants (EdgeSAM/EdgeTAM/EfficientTAM lineage) | ⬜ |
 | 6 | **3D tactical replay** (flagship) | Pitch homography → top-down minimap → depth-lifted 3D; a demo from a *single* broadcast camera | ⬜ |
@@ -36,8 +36,8 @@ A rung is "done" only when its **gate** is met *and verified* (by us + a Codex a
 Detailed per-rung deliverables & rationale live in each `handoff/rung-N/handoff.md`.
 
 ## 5. Current status
-- **Rungs 1–2 done.** Public repo: https://github.com/gimocimo/follow-anything
-- **Baseline to beat: HOTA 0.481** (bbox-HOTA, held-out game 4, SN-GSR-2025). Official metric later: **GS-HOTA** (pitch coordinates).
+- **Rungs 1–2 built; Rung 1 in hardening** after an adversarial review (§7). Public repo: https://github.com/gimocimo/follow-anything
+- **Baseline to beat: HOTA 0.481** (bbox-HOTA, all object categories incl. "other"; game 4 — now a **dev benchmark**). Untouched **final-confirmation set** = official `valid` split. Official metric later: **GS-HOTA** (pitch coordinates).
 - Caveats: internal package still named `pitchvision`; local dev on Apple **MPS** (~1 fps SAM 2, a Mac/hardware limit as much as a model one); disk tight; GSR-`train` has only 3 games → **leave-one-game-out** split.
 
 ## 6. Review protocol (Codex adversarial passes)
@@ -51,3 +51,4 @@ After each rung is completed:
 
 ## 7. Decision log (append-only — every intentional scope/plan change)
 - **2026-07-13** — Plan laid down. Data source pivoted SoccerNet-Tracking → **SN-GSR-2025** (KAUST share returned 401/dead). Repo renamed `pitch-vision` → **follow-anything** (general scope; football = showcase). Rungs 1–2 complete. Codex adversarial-review process adopted.
+- **2026-07-13 (later)** — **Rung-1 Codex review returned NO.** Adopted a hardening pass: committed a fail-closed **leave-one-game-out** split (fixes the empty-test-set default); strengthened the metric self-test to **exact** values (+ IoU-sensitivity case) under pytest/CI; added a **provenance manifest** to the baseline eval; require `info.game_id` for gate splits; **category policy = include category-7 "other"** (baseline stays 0.481, per-class diagnostics added); relabeled **game 4 as a dev benchmark** and reserved the official **`valid`** split as the untouched final-confirmation set (downloading); removed dead SoccerNet-Tracking code (`scripts/01`(old)/`03`/`04`, `data/soccernet.py`) and fixed the public data path.

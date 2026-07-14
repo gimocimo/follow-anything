@@ -49,7 +49,7 @@ Association (AssA) is the weaker half — the target for the next rungs. SoccerN
 - **Honest baselines** — sanity-checked hard enough to catch a real tracker-reset bug that would otherwise have reported a fake HOTA of 0.13.
 
 ## Works on any video
-Both engines are general-purpose. **YOLO** detects 80 everyday classes (people, cars, buses, bikes, …) out of the box; **SAM 2** is class-agnostic and follows *anything* you point at. Swapping football for traffic monitoring, wildlife, or retail analytics is mostly a matter of the input video and the target class list. *(Tracking specific people is surveillance — mind privacy, consent and law; keep showcases benign or clearly authorized.)*
+Both engines are general-purpose. **YOLO** detects 80 everyday classes (people, cars, buses, bikes, …) out of the box; **SAM 2** is class-agnostic and follows *anything* you point at. Swapping football for traffic monitoring, wildlife, or retail analytics is mostly a matter of the input video and the target class list. *(The Rung-1 tracker currently runs on COCO persons + sports-ball; enabling more classes is a one-line change — the "track everything" framing is the roadmap target, not yet the shipped scope.)* *(Tracking specific people is surveillance — mind privacy, consent and law; keep showcases benign or clearly authorized.)*
 
 ## Repo layout
 ```
@@ -86,7 +86,13 @@ python scripts/07_promptable_demo.py --clip <clip> --frames 90
 ```
 
 ## Data
-Football experiments use **SoccerNet SN-GSR-2025** (Game State Reconstruction), gated on Hugging Face — see `scripts/01/05/06`. The pipeline itself is data-agnostic.
+Football experiments use **SoccerNet SN-GSR-2025** (Game State Reconstruction), a gated Hugging Face dataset. After `hf auth login` (with dataset access):
+```bash
+python scripts/01_download_gsr.py --split train       # dev source (has labels)
+python scripts/05_gsr_make_splits.py                  # leave-one-game-out split (fail-closed)
+python scripts/06_gsr_baseline_eval.py --split test   # baseline HOTA + provenance manifest
+```
+`train` is the development source; the official `valid` split is the untouched final-confirmation set (`--split valid`). The pipeline itself is data-agnostic.
 
 ## Credits & licenses
 Ultralytics YOLO (**AGPL-3.0** — review before redistribution), SAM 2 (Apache-2.0), TrackEval (MIT), SoccerNet (research license). Check each before publishing derivatives.

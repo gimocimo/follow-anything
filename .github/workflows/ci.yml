@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  metric-selftest:
+    # Validates the TrackEval HOTA/MOTA/IDF1 harness against exact hand-computed
+    # values on every push/PR. Light — no torch/SAM 2 needed for the metric layer.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install evaluation deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy pytest \
+            "TrackEval @ git+https://github.com/JonathonLuiten/TrackEval.git@12c8791b303e0a0b50f753af204249e622d0281a"
+      - name: Metric harness self-test (exact values)
+        run: pytest -q scripts/02_eval_selftest.py
