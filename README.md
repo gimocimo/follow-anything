@@ -33,13 +33,14 @@ Given ordinary video, `follow-anything` aims to:
 > Full scope, invariants, and per-rung definition-of-done: **[docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)**.
 
 ## Results
-**Rung 1 — zero-shot baseline** (YOLO11n + BoT-SORT, no training) on a held-out game (leave-one-game-out over SoccerNet **SN-GSR-2025** `train`, 18 clips), scored with bbox-HOTA via TrackEval:
+**Rung 1 — zero-shot baseline** (YOLO11n + BoT-SORT, no training), bbox-HOTA via TrackEval, all object categories (SoccerNet **SN-GSR-2025**, leave-one-game-out):
 
-| HOTA | DetA | AssA | MOTA | IDF1 | IDSW |
-|---|---|---|---|---|---|
-| **0.481** | 0.611 | 0.381 | 0.734 | 0.541 | 2339 |
+| set | HOTA | DetA | AssA | MOTA | IDF1 | IDSW |
+|---|---|---|---|---|---|---|
+| dev benchmark (`train` game 4, 18 clips) | 0.481 | 0.611 | 0.381 | 0.734 | 0.541 | 2339 |
+| **untouched final** (`valid` game 2, 18 clips) | **0.492** | 0.602 | 0.403 | 0.714 | 0.551 | 1869 |
 
-Association (AssA) is the weaker half — the target for the next rungs. SoccerNet's official metric is GS-HOTA over pitch coordinates (the rung-6 flagship).
+The untouched-final number (0.492) matches the dev number (0.481) — confirming the baseline isn't inflated by evaluation-selection on the dev game. Association (AssA ≈ 0.40) is the weaker half — the target for the next rungs. Every number carries a provenance manifest (git SHA, package versions, weight hash, category counts). SoccerNet's official metric is GS-HOTA over pitch coordinates (the rung-6 flagship).
 
 **Rung 2 — promptable demo** (`scripts/07_promptable_demo.py`): give one object a click/box on the first frame and SAM 2 propagates the mask through the clip, rendering a *spotlight-that-object* video. Runs on Apple MPS; tracked the prompted player in 72/90 frames of a test clip.
 
