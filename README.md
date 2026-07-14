@@ -6,6 +6,10 @@ Football is the proving ground — dense, fast, near-identical targets and broad
 
 > **Status: active build.** Two rungs shipped — a rigorous baseline and a promptable "follow one object" demo. Roadmap below.
 
+![follow-anything demo — click a player, follow them](docs/demo.gif)
+
+*Click one object on the first frame → SAM 2 spotlights and follows it through the clip (here, a football player). The same code follows a car, a person, an animal — anything you point at.*
+
 ---
 
 ## Vision
