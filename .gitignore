@@ -12,6 +12,7 @@ data/*
 !data/.gitkeep
 outputs/*
 !outputs/.gitkeep
+runs/           # ultralytics training/val runs (weights, plots, csv)
 
 # Model weights & exports
 *.pt

@@ -72,8 +72,7 @@ def build_manifest(args, device, weights, splits_meta, category_counts):
         "packages": _versions(["torch", "torchvision", "ultralytics", "numpy",
                                 "opencv-python", "scipy", "trackeval", "lap"]),
         "detector": {"weights": str(wp), "sha256": _sha256(wp) if wp.exists() else None,
-                     "imgsz": args.imgsz, "conf": args.conf,
-                     "classes": "COCO person(0) + sports_ball(32)"},
+                     "imgsz": args.imgsz, "conf": args.conf, "classes": args.classes},
         "tracker": {"requested": args.tracker, "resolved": resolved_tracker,
                     "sha256": _sha256(Path(resolved_tracker)) if Path(resolved_tracker).exists() else None},
         "category_policy": "all object categories (player/GK/referee/ball + other); see src/pitchvision/data/gsr.py",
@@ -90,6 +89,9 @@ def main():
     ap.add_argument("--weights", default="yolo11n.pt")
     ap.add_argument("--imgsz", type=int, default=1280)
     ap.add_argument("--conf", type=float, default=0.25)
+    ap.add_argument("--classes", default="0,32",
+                    help="comma-sep detector class ids to keep (COCO person,ball=0,32; "
+                         "a fine-tuned GSR person,ball detector uses 0,1)")
     ap.add_argument("--tracker", default="botsort.yaml")
     ap.add_argument("--device", default="auto")
     ap.add_argument("--max-seqs", type=int, default=None, help="limit #sequences for a quick check")
@@ -119,6 +121,7 @@ def main():
             rows, nframes = run_image_folder(
                 seq_path / "img1", weights=args.weights, conf=args.conf,
                 imgsz=args.imgsz, tracker=args.tracker, device=args.device,
+                classes=tuple(int(c) for c in args.classes.split(",")),
             )
             write_tracker(pred_dir, TRACKER, name, rows)
             write_gt(gt_tmp, name, gsr_to_mot_rows(s["labels"], strict=True))

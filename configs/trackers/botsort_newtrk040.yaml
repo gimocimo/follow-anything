@@ -1,0 +1,21 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+#
+# BoT-SORT + new_track_thresh=0.40 — the Rung-3 phase-3a (association) winner.
+# Identical to the vendored botsort.yaml baseline EXCEPT new_track_thresh 0.25 -> 0.40,
+# which suppresses spurious new tracks from low-confidence detections. On DEV (game 4,
+# 18 clips) this moved HOTA 0.4815 -> 0.4982, AssA 0.381 -> 0.405, IDSW 2339 -> 1823.
+
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.40   # <-- the only change vs botsort.yaml (0.25); the 3a winner
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: True
+
+gmc_method: sparseOptFlow
+
+proximity_thresh: 0.5
+appearance_thresh: 0.8
+with_reid: False
+model: auto
