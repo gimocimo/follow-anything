@@ -20,6 +20,8 @@ from pathlib import Path
 import pytest
 
 VENDORED = "configs/trackers/botsort.yaml"
+# The exact vendored tracker the production path must resolve to (repo-root / VENDORED).
+_VENDORED_TRACKER = Path(__file__).resolve().parents[1] / VENDORED
 
 
 def _assert_single_streaming_call(calls, img_dir):
@@ -35,8 +37,10 @@ def _assert_single_streaming_call(calls, img_dir):
         f"must stream the whole folder; source was {kw.get('source')!r}, not {img_dir}"
     assert kw.get("stream") is True, "must stream the whole folder (not per-frame)"
     assert kw.get("persist") is True, "must persist tracker state"
-    assert str(kw.get("tracker", "")).endswith(VENDORED), \
-        f"vendored tracker not used by production path: {kw.get('tracker')!r}"
+    # Exact resolved-path equality (not a suffix match): the production path must
+    # resolve to *this* repo's vendored, version-pinned tracker config.
+    assert Path(str(kw.get("tracker", ""))).resolve() == _VENDORED_TRACKER.resolve(), \
+        f"production must use the vendored tracker {_VENDORED_TRACKER}, got {kw.get('tracker')!r}"
 
 
 def _make_frames(img_dir, n):
