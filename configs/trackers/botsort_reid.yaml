@@ -1,0 +1,22 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+#
+# BoT-SORT + ReID (Rung 3). Identical to the vendored botsort.yaml baseline EXCEPT
+# with_reid: True — so any HOTA/AssA delta isolates the appearance-embedding lever.
+# model: auto uses the detector's own backbone features as the ReID descriptor
+# (no extra model/weights). Targets the weak half of the baseline (AssA ~0.38-0.40).
+
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: True
+
+gmc_method: sparseOptFlow
+
+# ReID
+proximity_thresh: 0.5
+appearance_thresh: 0.8
+with_reid: True   # <-- the only change vs botsort.yaml
+model: auto       # native detector features as the ReID embedding (no extra model)
