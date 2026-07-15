@@ -40,14 +40,16 @@ EXPERIMENTS = {
         {"name": "reid_appear050",   "overrides": {"with_reid": True, "model": "auto", "appearance_thresh": 0.50}},
         {"name": "reid_buf60",       "overrides": {"with_reid": True, "model": "auto", "track_buffer": 60}},
     ],
-    # ---- Set B: detector strength (targets DetA); best Set-A tracker layered later ----
+    # ---- Set B: detector strength (targets DetA), on top of the Set-A winner
+    #      (new_track_thresh=0.40, held constant so the ranking isolates the detector).
+    #      n_1280 doubles as a cross-check: should reproduce the Set-A newtrk040 = 0.4982. ----
     "B": [
-        {"name": "n_1280",  "weights": "yolo11n.pt", "imgsz": 1280},
-        {"name": "s_1280",  "weights": "yolo11s.pt", "imgsz": 1280},
-        {"name": "m_1280",  "weights": "yolo11m.pt", "imgsz": 1280},
-        {"name": "x_1280",  "weights": "yolo11x.pt", "imgsz": 1280},
-        {"name": "m_1536",  "weights": "yolo11m.pt", "imgsz": 1536},
-        {"name": "x_1536",  "weights": "yolo11x.pt", "imgsz": 1536},
+        {"name": "n_1280",  "weights": "yolo11n.pt", "imgsz": 1280, "overrides": {"new_track_thresh": 0.40}},
+        {"name": "s_1280",  "weights": "yolo11s.pt", "imgsz": 1280, "overrides": {"new_track_thresh": 0.40}},
+        {"name": "m_1280",  "weights": "yolo11m.pt", "imgsz": 1280, "overrides": {"new_track_thresh": 0.40}},
+        {"name": "x_1280",  "weights": "yolo11x.pt", "imgsz": 1280, "overrides": {"new_track_thresh": 0.40}},
+        {"name": "m_1536",  "weights": "yolo11m.pt", "imgsz": 1536, "overrides": {"new_track_thresh": 0.40}},
+        {"name": "x_1536",  "weights": "yolo11x.pt", "imgsz": 1536, "overrides": {"new_track_thresh": 0.40}},
     ],
 }
 
@@ -91,7 +93,11 @@ def run_config(cfg, args, out_root):
     if args.max_seqs:
         cmd += ["--max-seqs", str(args.max_seqs)]
     print(f"\n>>> [{name}] {' '.join(cmd[3:])}", flush=True)
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"!!! [{name}] FAILED (exit {e.returncode}) — skipping this config", flush=True)
+        return None
     return json.loads(metrics_json.read_text())
 
 
@@ -119,9 +125,14 @@ def main():
     rows = []
     for cfg in configs:
         res = run_config(cfg, args, out_root)
+        if res is None:
+            continue  # config failed (e.g. weight download) — already logged; keep going
         m = res["metrics"]
         rows.append({"name": cfg["name"], "HOTA": m["HOTA"], "DetA": m["DetA"],
                      "AssA": m["AssA"], "MOTA": m["MOTA"], "IDF1": m["IDF1"], "IDSW": m["IDSW"]})
+    if not rows:
+        print("no configs succeeded — check the log")
+        return
 
     # Δ is measured against the sweep's OWN baseline row when present (identical
     # sequences — apples-to-apples), else the committed full-dev baseline.
