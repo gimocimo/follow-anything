@@ -15,6 +15,7 @@ eval stays apples-to-apples with the COCO baseline (which also doesn't special-c
     python scripts/09_gsr_to_yolo.py --source-split train --games 6,9 --out data/yolo_gsr_dev
 """
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -83,20 +84,32 @@ def main():
                     help="keep every Nth frame (adjacent frames are near-duplicates; 5 => ~150/clip)")
     ap.add_argument("--val-every", type=int, default=10, help="hold out every Nth clip as training val")
     ap.add_argument("--copy", action="store_true", help="copy images instead of symlinking")
+    ap.add_argument("--overwrite", action="store_true", help="atomically rebuild --out if it already exists")
     args = ap.parse_args()
 
-    games = {g.strip() for g in args.games.split(",")}
-    seqs = [s for s in index_gsr_sequences(args.data_dir, split=args.source_split, require_game_id=True)
-            if s["game_id"] in games]
-    if not seqs:
-        sys.exit(f"no sequences in split={args.source_split} with game_id in {sorted(games)}")
-
+    requested = {g.strip() for g in args.games.split(",")}
     out = Path(args.out)
+
+    # FAIL-CLOSED: never write into a non-empty directory. A prior export's stale frames
+    # (e.g. the eval game) would silently join THIS dataset via data.yaml, which globs the
+    # whole tree — the exact leak this rung must preclude. Rebuild only with --overwrite.
+    if out.exists() and any(out.iterdir()):
+        if not args.overwrite:
+            sys.exit(f"refusing to write into non-empty {out} — stale frames could leak in. "
+                     f"Pass --overwrite to rebuild it, or choose a fresh --out.")
+        shutil.rmtree(out)
+
+    seqs = [s for s in index_gsr_sequences(args.data_dir, split=args.source_split, require_game_id=True)
+            if s["game_id"] in requested]
+    if not seqs:
+        sys.exit(f"no sequences in split={args.source_split} with game_id in {sorted(requested)}")
+
     counts = {"train": {"img": 0, "person": 0, "ball": 0},
               "val": {"img": 0, "person": 0, "ball": 0}}
-    seen_games = set()
+    per_game, inventory = {}, []
+    fp = hashlib.sha256()  # fingerprint of the EXACT (subset, frame, game, label) set written
     for ci, s in enumerate(sorted(seqs, key=lambda x: x["name"])):
-        seen_games.add(s["game_id"])
+        gid = s["game_id"]
         subset = "val" if (ci % args.val_every == 0) else "train"
         (out / "images" / subset).mkdir(parents=True, exist_ok=True)
         (out / "labels" / subset).mkdir(parents=True, exist_ok=True)
@@ -115,22 +128,44 @@ def main():
                 if dst_img.is_symlink() or dst_img.exists():
                     dst_img.unlink()
                 dst_img.symlink_to(src.resolve())
-            lines = yolo_lines(meta["dim"], meta["boxes"])
-            (out / "labels" / subset / f"{stem}.txt").write_text(
-                "\n".join(lines) + ("\n" if lines else ""))
+            label_txt = "\n".join(yolo_lines(meta["dim"], meta["boxes"]))
+            label_txt += "\n" if label_txt else ""
+            (out / "labels" / subset / f"{stem}.txt").write_text(label_txt)
+            fp.update(f"{subset}/{stem}\t{gid}\t{label_txt}".encode())
             counts[subset]["img"] += 1
-            for ln in lines:
+            per_game[gid] = per_game.get(gid, 0) + 1
+            inventory.append({"subset": subset, "stem": stem, "game_id": gid})
+            for ln in label_txt.splitlines():
                 counts[subset]["ball" if ln.startswith("1 ") else "person"] += 1
+
+    # ASSERT the frames written come from EXACTLY the requested games — nothing more, nothing less.
+    observed = set(per_game)
+    if observed != requested:
+        sys.exit(f"GAME MISMATCH: requested {sorted(requested)} but wrote frames from {sorted(observed)} "
+                 f"(missing {sorted(requested - observed)}, extra {sorted(observed - requested)})")
 
     out.mkdir(parents=True, exist_ok=True)
     data_yaml = out / "data.yaml"
     data_yaml.write_text(yaml.safe_dump(
         {"path": str(out.resolve()), "train": "images/train", "val": "images/val", "names": NAMES},
         sort_keys=False))
-    print(f"games included: {sorted(seen_games)}  ({len(seqs)} clips)  stride={args.stride}")
+    manifest = {
+        "source_split": args.source_split,
+        "requested_games": sorted(requested), "observed_games": sorted(observed),
+        "per_game_frames": {g: per_game[g] for g in sorted(per_game)},
+        "n_clips": len(seqs), "stride": args.stride, "val_every": args.val_every,
+        "counts": counts, "export_sha256": fp.hexdigest(),
+        "note": "leave-one-game-out export. observed_games == requested_games and MUST exclude the "
+                "eval game(s). export_sha256 fingerprints the exact (frame, game, label) set trained on.",
+    }
+    (out / "export_manifest.json").write_text(json.dumps(manifest, indent=2))
+    (out / "export_inventory.json").write_text(json.dumps(inventory))
+
+    print(f"games written: {sorted(observed)} == requested {sorted(requested)}  ({len(seqs)} clips, stride {args.stride})")
+    print(f"  per-game frames: {manifest['per_game_frames']}")
     print(f"  train: {counts['train']['img']:6d} imgs | {counts['train']['person']} person | {counts['train']['ball']} ball")
     print(f"  val:   {counts['val']['img']:6d} imgs | {counts['val']['person']} person | {counts['val']['ball']} ball")
-    print(f"wrote {data_yaml}")
+    print(f"  export_sha256 {manifest['export_sha256'][:16]}…  ->  {out}/export_manifest.json")
     if counts["val"]["img"] == 0:
         print("WARNING: empty val set — lower --val-every or add clips")
 
