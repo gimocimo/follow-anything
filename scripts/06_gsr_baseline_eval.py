@@ -133,7 +133,8 @@ def main():
         shutil.rmtree(gt_tmp, ignore_errors=True)
 
     m = res[TRACKER]
-    print("\n==== GSR BASELINE (YOLO11n + BoT-SORT, zero training, bbox-HOTA) ====")
+    print(f"\n==== GSR eval — detector={Path(args.weights).name}  tracker={Path(args.tracker).name}"
+          f"  classes={args.classes}  (bbox-HOTA) ====")
     print(f"  HOTA {m['HOTA']:.4f} | MOTA {m['MOTA']:.4f} | IDF1 {m['IDF1']:.4f}")
     print(f"  DetA {m['DetA']:.4f} | AssA {m['AssA']:.4f} | IDSW {m['IDSW']}")
     print(f"  GT category counts: {dict(cat_counts)}")
