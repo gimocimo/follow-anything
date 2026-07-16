@@ -25,7 +25,7 @@ Given ordinary video, `follow-anything` aims to:
 |---|---|---|
 | 1 | Baseline tracking (YOLO + BoT-SORT) → **bbox-HOTA 0.481** on a held-out game | ✅ |
 | 2 | Promptable "click any object, follow it" (SAM 2) | ✅ demo |
-| 3 | Robust — occlusion + re-ID + ball; beat the baseline | ⬜ |
+| 3 | Robust — fine-tuned detector + tuned tracker; **beat the baseline** → **HOTA 0.492 → 0.609** on the sealed match | ✅ |
 | 4 | Permanence — re-acquire IDs across camera cuts | ⬜ |
 | 5 | Real-time / on-device — distil to live FPS | ⬜ |
 | 6 | 3D tactical replay — homography top-down → depth-lifted 3D | ⬜ |
@@ -41,6 +41,15 @@ Given ordinary video, `follow-anything` aims to:
 | **untouched final** (`valid` game 2, 18 clips) | **0.492** | 0.602 | 0.403 | 0.714 | 0.551 | 1869 |
 
 The untouched-final number (0.492) matches the dev number (0.481) — confirming the baseline isn't inflated by evaluation-selection on the dev game. Association (AssA ≈ 0.40) is the weaker half — the target for the next rungs. Every number carries a provenance manifest (git SHA, package versions, weight hash, category counts). SoccerNet's official metric is GS-HOTA over pitch coordinates (the rung-6 flagship).
+
+**Rung 3 — robust** (`scripts/08–10`): the detector fine-tuned on SoccerNet (yolo11m, trained **leave-one-game-out** on games {6,9}) + BoT-SORT with a tuned `new_track_thresh`. Scored with the *identical* sealed eval as Rung 1:
+
+| set | HOTA | DetA | AssA | MOTA | IDF1 | IDSW |
+|---|---|---|---|---|---|---|
+| dev (`train` game 4) | 0.481 → **0.627** | 0.611 → 0.721 | 0.381 → 0.546 | 0.734 → 0.885 | 0.541 → 0.725 | 2339 → 927 |
+| **sealed final** (`valid` game 2) | **0.492 → 0.609** | 0.602 → 0.712 | 0.403 → 0.522 | 0.714 → 0.859 | 0.551 → 0.688 | 1869 → **910** |
+
+**+24% HOTA on the sealed match, every metric up, ID switches halved** — and dev (0.627) ≈ final (0.609), so the gain generalises across matches rather than overfitting the dev game. What moved it: an ablation showed **detector strength dominates** (a bigger/fine-tuned detector beat tracker tuning ~4:1), and fine-tuned yolo11m even beats *zero-shot* yolo11x (0.564) — domain adaptation > raw model size. Provenance: [`results/rung3_baseline.json`](results/rung3_baseline.json).
 
 **Rung 2 — promptable demo** (`scripts/07_promptable_demo.py`): give one object a click/box on the first frame and SAM 2 propagates the mask through the clip, rendering a *spotlight-that-object* video. Runs on Apple MPS; tracked the prompted player in 72/90 frames of a test clip.
 
