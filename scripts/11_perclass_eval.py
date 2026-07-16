@@ -99,7 +99,7 @@ def main():
                 trows = [(r[0], r[1], r[2], r[3], r[4], r[5], r[6])
                          for r in all_tracks[name] if r[7] in spec["det_cls"]]
                 write_tracker(pred_dir, "ft", name, trows)
-                write_gt(gt_dir, name, gsr_to_mot_rows(s["labels"], keep_categories=spec["gt_cats"]))
+                write_gt(gt_dir, name, gsr_to_mot_rows(s["labels"], keep_categories=spec["gt_cats"], strict=True))
             m = evaluate(str(gt_dir), str(pred_dir), seq_lengths, trackers_to_eval=["ft"])["ft"]
             out[g] = {k: m[k] for k in ("HOTA", "DetA", "AssA", "MOTA", "IDF1", "IDSW")}
         finally:

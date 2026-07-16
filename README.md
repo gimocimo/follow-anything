@@ -4,7 +4,7 @@
 
 Football is the proving ground — dense, fast, near-identical targets and broadcast camera cuts make it tracking on *hard mode* — but the pipeline is **domain-agnostic**: the detector already knows people, cars and bikes, and SAM 2 will follow literally anything you click.
 
-> **Status: active build.** Two rungs shipped — a rigorous baseline and a promptable "follow one object" demo. Roadmap below.
+> **Status: active build.** Three rungs shipped — a rigorous baseline, a promptable "follow one object" demo, and a football-fine-tuned detector that beats the baseline on a sealed match. Roadmap below.
 
 ![follow-anything demo — click a player, follow them](docs/demo.gif)
 
@@ -51,7 +51,7 @@ The untouched-final number (0.492) matches the dev number (0.481) — confirming
 
 **+24% HOTA on the sealed match, every metric up, ID switches halved** — and dev (0.627) ≈ final (0.609), so the gain generalises across matches rather than overfitting the dev game. What moved it: an ablation showed **detector strength dominates** (a bigger/fine-tuned detector beat tracker tuning ~4:1), and fine-tuned yolo11m even beats *zero-shot* yolo11x (0.564) — domain adaptation > raw model size.
 
-**Honest caveat — per-class (`scripts/11_perclass_eval.py`, dev):** the win is *player-driven*. Players reach HOTA **0.64**, but the **ball only 0.12** (detected ~15% of the time: ~10 px, fast, single-instance, ~6% of the fine-tuning boxes). Fixing ball tracking — higher-res/crop inference, ball oversampling, ball-specific tracker params — is the explicit next target. Provenance: [`results/rung3_baseline.json`](results/rung3_baseline.json).
+**Honest caveat — per-class (`scripts/11_perclass_eval.py`, dev):** the win is *people-driven*. The person class (players + goalkeepers + referees) reaches HOTA **0.64**, but the **ball only 0.12** (DetA **0.15** — rarely caught: ~10 px, fast, single-instance, ~6% of the fine-tuning boxes). Fixing ball tracking — higher-res/crop inference, ball oversampling, ball-specific tracker params — is the explicit next target. Provenance: [`results/rung3_baseline.json`](results/rung3_baseline.json).
 
 **Rung 2 — promptable demo** (`scripts/07_promptable_demo.py`): give one object a click/box on the first frame and SAM 2 propagates the mask through the clip, rendering a *spotlight-that-object* video. Runs on Apple MPS; tracked the prompted player in 72/90 frames of a test clip.
 

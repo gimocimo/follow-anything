@@ -71,24 +71,34 @@ def run_config(cfg, args, out_root):
     name = cfg["name"]
     out_dir = out_root / name
     metrics_json = out_dir / "baseline_metrics.json"
-    if metrics_json.exists() and not args.force:
-        cached = json.loads(metrics_json.read_text())
-        # only reuse if it matches THIS run's split + subset scope (avoids reusing a
-        # 1-clip smoke result for a full-dev run, or vice-versa)
-        if cached.get("split") == args.split and cached.get("subset") == bool(args.max_seqs):
-            print(f">>> [{name}] cached ({'subset' if args.max_seqs else 'full'}) — reuse", flush=True)
-            return cached
-
     tracker = resolve_tracker(cfg, out_root / "trackers")
+    weights = cfg.get("weights", "yolo11n.pt")
+    imgsz = cfg.get("imgsz", 1280)
+    conf = cfg.get("conf", 0.25)
+
+    if metrics_json.exists() and not args.force:
+        c = json.loads(metrics_json.read_text())
+        pa = c.get("provenance", {}).get("args", {})
+        # Reuse ONLY if EVERY knob that changes the number matches: split + splits-file,
+        # subset scope + exact #seqs, detector weights, imgsz, conf, resolved tracker path.
+        # (A split+subset-only key silently reuses e.g. a 1-clip smoke for a 6-clip run.)
+        same = (c.get("split") == args.split
+                and str(pa.get("splits_file")) == str(args.splits_file)
+                and c.get("subset") == bool(args.max_seqs)
+                and (not args.max_seqs or c.get("n_seqs") == args.max_seqs)
+                and str(pa.get("weights")) == str(weights)
+                and int(pa.get("imgsz", -1)) == int(imgsz)
+                and float(pa.get("conf", -1.0)) == float(conf)
+                and str(pa.get("tracker")) == str(tracker))
+        if same:
+            print(f">>> [{name}] cached (exact match) — reuse", flush=True)
+            return c
+
     cmd = [
         sys.executable, str(PROJ / "scripts" / "06_gsr_baseline_eval.py"),
         "--splits-file", args.splits_file, "--split", args.split,
-        "--weights", cfg.get("weights", "yolo11n.pt"),
-        "--imgsz", str(cfg.get("imgsz", 1280)),
-        "--conf", str(cfg.get("conf", 0.25)),
-        "--tracker", tracker,
-        "--device", args.device,
-        "--out-dir", str(out_dir),
+        "--weights", str(weights), "--imgsz", str(imgsz), "--conf", str(conf),
+        "--tracker", tracker, "--device", args.device, "--out-dir", str(out_dir),
     ]
     if args.max_seqs:
         cmd += ["--max-seqs", str(args.max_seqs)]
