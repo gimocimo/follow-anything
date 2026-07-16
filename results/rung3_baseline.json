@@ -32,6 +32,12 @@
     "git_sha": "abaa5503d3d3978ee4aa35cb2cbf0a4fc680d797", "device": "cuda",
     "gt_category_counts": {"player": 172666, "goalkeeper": 9070, "referee": 15424, "ball": 12179, "other": 399}
   },
+  "per_class_dev": {
+    "note": "per-class HOTA on DEV game 4 (scripts/11_perclass_eval.py). 'all' reproduces the headline to ~0.003 (local MPS vs the pod's CUDA run). The ball is the dominant limitation — barely tracked.",
+    "all":    {"HOTA": 0.6242, "DetA": 0.7210, "AssA": 0.5413, "IDSW": 938},
+    "person": {"HOTA": 0.6415, "DetA": 0.7543, "AssA": 0.5464, "IDSW": 812},
+    "ball":   {"HOTA": 0.1216, "DetA": 0.1525, "AssA": 0.0979, "IDSW": 123}
+  },
   "packages": {"torch": "2.8.0+cu128", "torchvision": "0.23.0+cu128", "ultralytics": "8.4.96",
                "numpy": "2.1.2", "opencv-python": "5.0.0.93", "scipy": "1.18.0",
                "trackeval": "1.0.dev1", "lap": "0.5.13"},

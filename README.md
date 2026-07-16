@@ -49,7 +49,9 @@ The untouched-final number (0.492) matches the dev number (0.481) — confirming
 | dev (`train` game 4) | 0.481 → **0.627** | 0.611 → 0.721 | 0.381 → 0.546 | 0.734 → 0.885 | 0.541 → 0.725 | 2339 → 927 |
 | **sealed final** (`valid` game 2) | **0.492 → 0.609** | 0.602 → 0.712 | 0.403 → 0.522 | 0.714 → 0.859 | 0.551 → 0.688 | 1869 → **910** |
 
-**+24% HOTA on the sealed match, every metric up, ID switches halved** — and dev (0.627) ≈ final (0.609), so the gain generalises across matches rather than overfitting the dev game. What moved it: an ablation showed **detector strength dominates** (a bigger/fine-tuned detector beat tracker tuning ~4:1), and fine-tuned yolo11m even beats *zero-shot* yolo11x (0.564) — domain adaptation > raw model size. Provenance: [`results/rung3_baseline.json`](results/rung3_baseline.json).
+**+24% HOTA on the sealed match, every metric up, ID switches halved** — and dev (0.627) ≈ final (0.609), so the gain generalises across matches rather than overfitting the dev game. What moved it: an ablation showed **detector strength dominates** (a bigger/fine-tuned detector beat tracker tuning ~4:1), and fine-tuned yolo11m even beats *zero-shot* yolo11x (0.564) — domain adaptation > raw model size.
+
+**Honest caveat — per-class (`scripts/11_perclass_eval.py`, dev):** the win is *player-driven*. Players reach HOTA **0.64**, but the **ball only 0.12** (detected ~15% of the time: ~10 px, fast, single-instance, ~6% of the fine-tuning boxes). Fixing ball tracking — higher-res/crop inference, ball oversampling, ball-specific tracker params — is the explicit next target. Provenance: [`results/rung3_baseline.json`](results/rung3_baseline.json).
 
 **Rung 2 — promptable demo** (`scripts/07_promptable_demo.py`): give one object a click/box on the first frame and SAM 2 propagates the mask through the clip, rendering a *spotlight-that-object* video. Runs on Apple MPS; tracked the prompted player in 72/90 frames of a test clip.
 
