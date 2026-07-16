@@ -24,6 +24,11 @@ def main():
     ap.add_argument("--project", default="runs/gsr_ft")
     ap.add_argument("--name", default=None)
     ap.add_argument("--patience", type=int, default=20, help="early-stop patience (epochs)")
+    ap.add_argument("--workers", type=int, default=8,
+                    help="dataloader workers; use 0 if training HANGS at 'Starting training' "
+                         "(low container /dev/shm deadlocks forked workers — common on rented pods)")
+    ap.add_argument("--amp", default="true", choices=["true", "false"],
+                    help="mixed precision; set false if loss/backward is NaN on very new GPUs")
     args = ap.parse_args()
 
     from ultralytics import YOLO
@@ -37,6 +42,7 @@ def main():
     model.train(
         data=args.data, epochs=args.epochs, imgsz=args.imgsz, batch=batch,
         device=args.device, project=project, name=name, patience=args.patience,
+        workers=args.workers, amp=(args.amp == "true"),
         # broadcast football framing is consistent -> mild geometric aug, no rotation/flip-heavy tricks
         mosaic=1.0, close_mosaic=10, degrees=0.0, fliplr=0.5, scale=0.5, translate=0.1,
         hsv_h=0.015, hsv_s=0.7, hsv_v=0.4, verbose=True,
