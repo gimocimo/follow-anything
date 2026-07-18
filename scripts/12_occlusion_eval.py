@@ -1,27 +1,39 @@
 #!/usr/bin/env python3
-"""Occlusion analysis (Rung 3): does the tracker RECOVER a player's identity after an
-occlusion? A dev-only proxy (no tuning on the sealed set) that isolates occlusion, which
-global AssA/IDSW only blend together.
+"""On-screen occlusion benchmark (Rung 3): when a player is occluded **by another player**,
+does the tracker keep their identity?
 
-Method: for each GT person identity we find *visibility gaps* — frames where its box
-disappears for 1..maxgap frames then returns (occlusion or a brief off-screen). We match
-tracker IDs to GT IDs per frame by IoU >= iou_thr, then for each gap ask: did the tracker
-keep the SAME track ID before and after the gap? recovery_rate = recovered / total gaps,
-stratified by gap length (short gaps are easier). Persons only (players/GK/referee) —
-the occlusion-relevant class (the ball's problem is detection, not occlusion recovery).
+Supersedes an earlier statistic that counted GT "visibility gaps". An adversarial audit showed
+25/27 of those gaps were **frame-edge exits** (not occlusions) and 26/27 of the apparent
+failures were **detection** failures — so the number measured edge detection coverage and was
+mislabelled as occlusion recovery. It has been withdrawn.
+
+This version:
+  * **Occlusion episode** = a run of frames where a GT person is overlapped by ANOTHER GT
+    person with IoU >= `--occ-thr`, entered *and* exited while that player is **interior**
+    (their box never touches the frame border) — i.e. a genuine on-screen occlusion.
+  * Reports **endpoint coverage** (did the tracker detect the player on both sides at all?)
+    and **conditional same-ID retention** (of episodes where both endpoints WERE detected,
+    how often was identity kept?) as SEPARATE numbers — detection failure is never reported
+    as an identity failure.
+  * Reports frame-edge exit/re-entry events separately, correctly labelled.
+  * Keeps **ID fragmentation** (distinct tracker IDs per GT person track-instance).
+  * Stamps full provenance (weights/tracker sha256, split, args, versions, git SHA).
 
     python scripts/12_occlusion_eval.py --weights models/yolo11m_gsr_ft.pt --classes 0,1 \
       --tracker configs/trackers/botsort_newtrk040.yaml --split test --out-dir outputs/gsr_ft_dev
 """
 import argparse
+import hashlib
 import json
+import platform
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pitchvision.data.gsr import gsr_to_mot_rows
-from pitchvision.pipeline.run_video import run_image_folder
+from pitchvision.pipeline.run_video import _resolve_tracker, run_image_folder
 
 PERSON_CATS = {1, 2, 3}
 
@@ -35,8 +47,36 @@ def iou(a, b):
     return inter / ua if ua > 0 else 0.0
 
 
+def _sha256(path):
+    p = Path(path)
+    if not p.exists():
+        return None
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def _git_sha():
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(Path(__file__).resolve().parents[1]), "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        return None
+
+
+def frame_dims(labels_json):
+    data = json.loads(Path(labels_json).read_text())
+    for img in data.get("images", []):
+        w, h = img.get("width"), img.get("height")
+        if w and h:
+            return float(w), float(h)
+    return None
+
+
 def match_per_frame(gt_rows, tr_rows, iou_thr):
-    """frame -> {gt_id: track_id} via greedy IoU (highest-IoU first, one-to-one)."""
+    """frame -> {gt_id: track_id} via greedy highest-IoU one-to-one matching."""
     tr_by_fr, gt_by_fr = defaultdict(list), defaultdict(list)
     for (f, tid, x, y, w, h, *_) in tr_rows:
         tr_by_fr[f].append((tid, (x, y, w, h)))
@@ -56,31 +96,82 @@ def match_per_frame(gt_rows, tr_rows, iou_thr):
             if gid not in ug and tid not in ut:
                 assign[f][gid] = tid
                 ug.add(gid); ut.add(tid)
-    return assign
+    return assign, gt_by_fr
 
 
-def analyze(gt_rows, tr_rows, maxgap, iou_thr):
-    assign = match_per_frame(gt_rows, tr_rows, iou_thr)
-    frames_of = defaultdict(set)
+def analyze(gt_rows, tr_rows, dims, occ_thr, iou_thr, edge_px, max_len):
+    assign, gt_by_fr = match_per_frame(gt_rows, tr_rows, iou_thr)
+    W, H = dims if dims else (None, None)
+
+    def interior(box):
+        if W is None:
+            return True
+        x, y, w, h = box
+        return (x > edge_px and y > edge_px and (x + w) < (W - edge_px) and (y + h) < (H - edge_px))
+
+    box_of, overlap = {}, {}
+    for f, gts in gt_by_fr.items():
+        for gid, gb in gts:
+            box_of[(f, gid)] = gb
+            m = 0.0
+            for ogid, ob in gts:
+                if ogid != gid:
+                    m = max(m, iou(gb, ob))
+            overlap[(f, gid)] = m
+
+    frames_of = defaultdict(list)
     for (f, gid, *_) in gt_rows:
-        frames_of[gid].add(f)
-    by_len = defaultdict(lambda: [0, 0])   # gap_len -> [recovered, total] (direct occlusion recovery)
-    frag = []                              # distinct tracker IDs per GT person (1 = cleanly tracked)
+        frames_of[gid].append(f)
+
+    episodes = {"n": 0, "both_endpoints": 0, "retained": 0, "switched": 0, "one_or_no_endpoint": 0}
+    frag = []
+    edge_gaps, interior_gaps = 0, 0
+
     for gid, frs in frames_of.items():
-        frs = sorted(frs)
+        frs = sorted(set(frs))
         ids = {assign.get(f, {}).get(gid) for f in frs}
         ids.discard(None)
         if ids:
             frag.append(len(ids))
+
+        # --- visibility gaps, split honestly into edge vs interior (reported separately) ---
         for i in range(len(frs) - 1):
             gap = frs[i + 1] - frs[i] - 1
-            if 1 <= gap <= maxgap:
-                before = assign.get(frs[i], {}).get(gid)
-                after = assign.get(frs[i + 1], {}).get(gid)
-                ok = (before is not None and before == after)
-                by_len[gap][1] += 1
-                by_len[gap][0] += 1 if ok else 0
-    return by_len, frag
+            if 1 <= gap <= max_len:
+                a, b = box_of.get((frs[i], gid)), box_of.get((frs[i + 1], gid))
+                if a and b and interior(a) and interior(b):
+                    interior_gaps += 1
+                else:
+                    edge_gaps += 1
+
+        # --- on-screen occlusion episodes: occluded by ANOTHER player, entered/exited interior ---
+        i = 0
+        while i < len(frs):
+            if overlap.get((frs[i], gid), 0.0) < occ_thr:
+                i += 1
+                continue
+            j = i
+            while j + 1 < len(frs) and overlap.get((frs[j + 1], gid), 0.0) >= occ_thr:
+                j += 1
+            entry_i, exit_i = i - 1, j + 1          # frames either side of the episode
+            if entry_i >= 0 and exit_i < len(frs) and (frs[j] - frs[i] + 1) <= max_len:
+                fe, fx = frs[entry_i], frs[exit_i]
+                be, bx = box_of.get((fe, gid)), box_of.get((fx, gid))
+                if be and bx and interior(be) and interior(bx):
+                    episodes["n"] += 1
+                    tid_e = assign.get(fe, {}).get(gid)
+                    tid_x = assign.get(fx, {}).get(gid)
+                    if tid_e is not None and tid_x is not None:
+                        episodes["both_endpoints"] += 1
+                        if tid_e == tid_x:
+                            episodes["retained"] += 1
+                        else:
+                            episodes["switched"] += 1
+                    else:
+                        episodes["one_or_no_endpoint"] += 1
+            i = j + 1
+
+    return episodes, frag, edge_gaps, interior_gaps
 
 
 def main():
@@ -94,8 +185,10 @@ def main():
     ap.add_argument("--tracker", default="configs/trackers/botsort_newtrk040.yaml")
     ap.add_argument("--device", default="auto")
     ap.add_argument("--max-seqs", type=int, default=None)
-    ap.add_argument("--maxgap", type=int, default=30, help="max gap length (frames) counted as occlusion (~1s)")
-    ap.add_argument("--iou-thr", type=float, default=0.5)
+    ap.add_argument("--occ-thr", type=float, default=0.3, help="IoU with another player that counts as occlusion")
+    ap.add_argument("--iou-thr", type=float, default=0.5, help="GT<->track matching IoU")
+    ap.add_argument("--edge-px", type=float, default=8.0, help="border margin; boxes nearer than this are 'edge'")
+    ap.add_argument("--max-len", type=int, default=30, help="max episode/gap length in frames (~1s)")
     ap.add_argument("--out-dir", default="outputs/gsr_ft_dev")
     args = ap.parse_args()
 
@@ -105,46 +198,59 @@ def main():
         seqs = seqs[: args.max_seqs]
     classes = tuple(int(c) for c in args.classes.split(","))
 
-    agg = defaultdict(lambda: [0, 0])
-    all_frag = []
+    tot = {"n": 0, "both_endpoints": 0, "retained": 0, "switched": 0, "one_or_no_endpoint": 0}
+    all_frag, edge_g, int_g = [], 0, 0
     for k, s in enumerate(seqs, 1):
         print(f"  [{k}/{len(seqs)}] {s['name']} ...", flush=True)
         tr_rows, _ = run_image_folder(Path(s["path"]) / "img1", weights=args.weights, classes=classes,
                                       conf=args.conf, imgsz=args.imgsz, tracker=args.tracker, device=args.device)
         gt_rows = gsr_to_mot_rows(s["labels"], keep_categories=PERSON_CATS, strict=True)
-        by_len, frag = analyze(gt_rows, tr_rows, args.maxgap, args.iou_thr)
-        for L, (r, t) in by_len.items():
-            agg[L][0] += r
-            agg[L][1] += t
+        ep, frag, eg, ig = analyze(gt_rows, tr_rows, frame_dims(s["labels"]),
+                                   args.occ_thr, args.iou_thr, args.edge_px, args.max_len)
+        for key in tot:
+            tot[key] += ep[key]
         all_frag += frag
+        edge_g += eg
+        int_g += ig
 
-    tot_r = sum(v[0] for v in agg.values())
-    tot_t = sum(v[1] for v in agg.values())
-    buckets = {"1-3": [0, 0], "4-10": [0, 0], "11-30": [0, 0]}
-    for L, (r, t) in agg.items():
-        b = "1-3" if L <= 3 else ("4-10" if L <= 10 else "11-30")
-        buckets[b][0] += r
-        buckets[b][1] += t
-
-    rate = tot_r / tot_t if tot_t else 0.0
     nf = len(all_frag)
     mean_frag = sum(all_frag) / nf if nf else 0.0
     single = sum(1 for x in all_frag if x == 1)
-    print(f"\n==== Rung-3 occlusion analysis (dev persons, {Path(args.weights).name}) ====")
-    print(f"  ID fragmentation: mean {mean_frag:.2f} tracker-IDs per GT person | "
-          f"cleanly tracked (1 ID): {single}/{nf} ({100*single/nf if nf else 0:.0f}%)")
-    print(f"  recovery across visibility gaps (1..{args.maxgap} fr): {tot_r}/{tot_t} = {rate:.3f}")
-    for b, (r, t) in buckets.items():
-        if t:
-            print(f"    gap {b:>5} fr: {r/t:.3f}  ({r}/{t})")
+    cov = tot["both_endpoints"] / tot["n"] if tot["n"] else 0.0
+    ret = tot["retained"] / tot["both_endpoints"] if tot["both_endpoints"] else None
+
+    print(f"\n==== Rung-3 on-screen occlusion (dev persons, {Path(args.weights).name}) ====")
+    print(f"  occlusion episodes (IoU>={args.occ_thr} with another player, interior entry+exit): {tot['n']}")
+    print(f"    endpoint coverage (tracker saw the player both sides): {tot['both_endpoints']}/{tot['n']} = {cov:.3f}")
+    print(f"    CONDITIONAL same-ID retention (of those): "
+          + (f"{tot['retained']}/{tot['both_endpoints']} = {ret:.3f}" if ret is not None else "n/a")
+          + f"   (switched {tot['switched']})")
+    print(f"    detection-limited episodes (one/no endpoint detected): {tot['one_or_no_endpoint']}")
+    print(f"  ID fragmentation: mean {mean_frag:.2f} tracker-IDs per GT person track-instance | "
+          f"single-ID {single}/{nf} ({100*single/nf if nf else 0:.0f}%)")
+    print(f"  [separately] visibility gaps — interior {int_g}, frame-edge {edge_g} "
+          f"(edge gaps are exits/re-entries, NOT occlusions)")
+
+    out = {
+        "occlusion_episodes": {**tot, "endpoint_coverage": cov, "conditional_same_id_retention": ret},
+        "fragmentation": {"mean_ids_per_gt": mean_frag, "single_id": single, "n_gt_track_instances": nf},
+        "visibility_gaps": {"interior": int_g, "frame_edge": edge_g,
+                            "note": "edge gaps are exits/re-entries, not occlusions"},
+        "params": {"occ_thr": args.occ_thr, "iou_thr": args.iou_thr, "edge_px": args.edge_px,
+                   "max_len": args.max_len},
+        "provenance": {
+            "git_sha": _git_sha(), "python": platform.python_version(), "platform": platform.platform(),
+            "split": {"file": args.splits_file, "name": args.split, "n_seqs": len(seqs)},
+            "detector": {"weights": args.weights, "sha256": _sha256(args.weights),
+                         "imgsz": args.imgsz, "conf": args.conf, "classes": args.classes},
+            "tracker": {"requested": args.tracker, "resolved": _resolve_tracker(args.tracker),
+                        "sha256": _sha256(_resolve_tracker(args.tracker))},
+            "args": vars(args),
+        },
+    }
     dst = Path(args.out_dir) / "occlusion_metrics.json"
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text(json.dumps({
-        "fragmentation": {"mean_ids_per_gt": mean_frag, "clean_single_id": single, "n_gt_tracks": nf},
-        "gap_recovery": {"rate": rate, "gaps": tot_t, "recovered": tot_r, "maxgap": args.maxgap,
-                         "iou_thr": args.iou_thr,
-                         "buckets": {b: {"recovered": v[0], "total": v[1]} for b, v in buckets.items()}},
-    }, indent=2))
+    dst.write_text(json.dumps(out, indent=2))
     print(f"saved -> {dst}")
 
 

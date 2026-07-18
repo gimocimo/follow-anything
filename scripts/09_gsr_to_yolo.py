@@ -4,8 +4,11 @@
 **Leave-one-game-out by construction:** pass only the games DISJOINT from the eval
 game via --games, so the fine-tuned detector never sees a frame from its evaluation
 game. This is the same anti-leakage invariant (PROJECT_PLAN §3) enforced everywhere else.
-    dev detector   (eval = train game 4):  --source-split train --games 6,9
-    final detector (eval = valid game 2):  --source-split train --games 4,6,9   # valid/game2 unseen
+    Rung-3 actual recipe:  --source-split train --games 6,9
+    -> ONE model, disjoint from BOTH eval games (train game 4 = dev, valid game 2 = sealed
+       final), so dev and final are scored by the *identical* checkpoint. A separate
+       {4,6,9} "final" detector is deliberately NOT used: it would make dev and final
+       different models and break that matching.
 
 Classes: 0=person (GSR player/GK/referee = cats 1,2,3), 1=ball (cat 4). GSR cat 7
 "other" (~0.5%, ambiguous) and non-object cats (pitch/camera) are excluded from

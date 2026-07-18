@@ -23,6 +23,8 @@ from pathlib import Path
 import yaml
 
 PROJ = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJ / "src"))
+from pitchvision.data.export_verify import sha256_file  # noqa: E402
 BASE_TRACKER = PROJ / "configs" / "trackers" / "botsort.yaml"
 BASELINE_HOTA = {"test": 0.4814830134807477}  # dev game-4 baseline (results/rung1_baseline.json)
 
@@ -67,7 +69,7 @@ def resolve_tracker(cfg, dst_dir):
     return str(out)
 
 
-def run_config(cfg, args, out_root):
+def run_config(cfg, args, out_root, expected_n):
     name = cfg["name"]
     out_dir = out_root / name
     metrics_json = out_dir / "baseline_metrics.json"
@@ -78,20 +80,22 @@ def run_config(cfg, args, out_root):
 
     if metrics_json.exists() and not args.force:
         c = json.loads(metrics_json.read_text())
-        pa = c.get("provenance", {}).get("args", {})
-        # Reuse ONLY if EVERY knob that changes the number matches: split + splits-file,
-        # subset scope + exact #seqs, detector weights, imgsz, conf, resolved tracker path.
-        # (A split+subset-only key silently reuses e.g. a 1-clip smoke for a 6-clip run.)
+        prov = c.get("provenance", {})
+        pa = prov.get("args", {})
+        # Reuse ONLY on an exact IDENTITY match. A path is not an identity: a checkpoint or a
+        # tracker config can change bytes at the same path, and a full run's clip count can
+        # change — both silently reuse the wrong experiment. Compare CONTENT HASHES, and
+        # validate the sequence count on every run (not just subset runs).
         same = (c.get("split") == args.split
                 and str(pa.get("splits_file")) == str(args.splits_file)
+                and c.get("n_seqs") == expected_n
                 and c.get("subset") == bool(args.max_seqs)
-                and (not args.max_seqs or c.get("n_seqs") == args.max_seqs)
-                and str(pa.get("weights")) == str(weights)
                 and int(pa.get("imgsz", -1)) == int(imgsz)
                 and float(pa.get("conf", -1.0)) == float(conf)
-                and str(pa.get("tracker")) == str(tracker))
+                and prov.get("detector", {}).get("sha256") == sha256_file(weights)
+                and prov.get("tracker", {}).get("sha256") == sha256_file(tracker))
         if same:
-            print(f">>> [{name}] cached (exact match) — reuse", flush=True)
+            print(f">>> [{name}] cached (identity: weights+tracker hashes, {expected_n} seqs) — reuse", flush=True)
             return c
 
     cmd = [
@@ -132,9 +136,13 @@ def main():
         want = {n.strip() for n in args.only.split(",")}
         configs = [c for c in configs if c["name"] in want]
 
+    # how many sequences THIS run will actually score — part of the cache identity
+    _all_seqs = json.loads(Path(args.splits_file).read_text())[args.split]
+    expected_n = len(_all_seqs[: args.max_seqs] if args.max_seqs else _all_seqs)
+
     rows = []
     for cfg in configs:
-        res = run_config(cfg, args, out_root)
+        res = run_config(cfg, args, out_root, expected_n)
         if res is None:
             continue  # config failed (e.g. weight download) — already logged; keep going
         m = res["metrics"]
