@@ -1,0 +1,32 @@
+{
+  "source_split": "train",
+  "requested_games": [
+    "6",
+    "9"
+  ],
+  "observed_games": [
+    "6",
+    "9"
+  ],
+  "per_game_frames": {
+    "6": 2850,
+    "9": 3000
+  },
+  "n_clips": 39,
+  "stride": 5,
+  "val_every": 10,
+  "counts": {
+    "train": {
+      "img": 5250,
+      "person": 79677,
+      "ball": 5090
+    },
+    "val": {
+      "img": 600,
+      "person": 10394,
+      "ball": 575
+    }
+  },
+  "export_sha256": "1dcf475bfdb67bdd9a4a6d215213bd002d7541de56bd6e18b95e014028ecedbb",
+  "note": "leave-one-game-out export. observed_games == requested_games and MUST exclude the eval game(s). export_sha256 fingerprints the exact (frame, game, label) set trained on."
+}

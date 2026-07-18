@@ -25,7 +25,7 @@ Given ordinary video, `follow-anything` aims to:
 |---|---|---|
 | 1 | Baseline tracking (YOLO + BoT-SORT) → **bbox-HOTA 0.481** on a held-out game | ✅ |
 | 2 | Promptable "click any object, follow it" (SAM 2) | ✅ demo |
-| 3 | Robust — fine-tuned detector + tuned tracker; **beat the baseline** → **HOTA 0.492 → 0.609** on the sealed match | ✅ |
+| 3 | Robust — fine-tuned detector + tuned tracker; **beat the baseline** → **HOTA 0.492 → 0.596** on the sealed match (provably leak-free) | ✅ |
 | 4 | Permanence — re-acquire IDs across camera cuts | ⬜ |
 | 5 | Real-time / on-device — distil to live FPS | ⬜ |
 | 6 | 3D tactical replay — homography top-down → depth-lifted 3D | ⬜ |
@@ -46,12 +46,12 @@ The untouched-final number (0.492) matches the dev number (0.481) — confirming
 
 | set | HOTA | DetA | AssA | MOTA | IDF1 | IDSW |
 |---|---|---|---|---|---|---|
-| dev (`train` game 4) | 0.481 → **0.627** | 0.611 → 0.721 | 0.381 → 0.546 | 0.734 → 0.885 | 0.541 → 0.725 | 2339 → 927 |
-| **sealed final** (`valid` game 2) | **0.492 → 0.609** | 0.602 → 0.712 | 0.403 → 0.522 | 0.714 → 0.859 | 0.551 → 0.688 | 1869 → **910** |
+| dev (`train` game 4) | 0.481 → **0.625** | 0.611 → 0.719 | 0.381 → 0.543 | 0.734 → 0.885 | 0.541 → 0.725 | 2339 → 977 |
+| **sealed final** (`valid` game 2) | **0.492 → 0.596** | 0.602 → 0.708 | 0.403 → 0.503 | 0.714 → 0.857 | 0.551 → 0.678 | 1869 → **971** |
 
-**+24% HOTA on the sealed match, every metric up, ID switches halved** — and dev (0.627) ≈ final (0.609), so the gain generalises across matches rather than overfitting the dev game. What moved it: an ablation showed **detector strength dominates** (a bigger/fine-tuned detector beat tracker tuning ~4:1), and fine-tuned yolo11m even beats *zero-shot* yolo11x (0.564) — domain adaptation > raw model size.
+**+21% HOTA on the sealed match, every metric up, ID switches ~halved** — and dev (0.625) ≈ final (0.596), so the gain generalises across matches rather than overfitting the dev game. The detector was fine-tuned on a **fingerprint-verified `{6,9}`-only export** — *provably* leave-one-game-out (it never saw game 4 or game 2; see [`results/rung3_provenance/`](results/rung3_provenance/)). What moved it: an ablation showed **detector strength dominates** (~4:1 over tracker tuning), and fine-tuned yolo11m even beats *zero-shot* yolo11x (0.564) — domain adaptation > raw model size.
 
-**Honest caveat — per-class (`scripts/11_perclass_eval.py`, dev):** the win is *people-driven*. The person class (players + goalkeepers + referees) reaches HOTA **0.64**, but the **ball only 0.12** (DetA **0.15** — rarely caught: ~10 px, fast, single-instance, ~6% of the fine-tuning boxes). Fixing ball tracking — higher-res/crop inference, ball oversampling, ball-specific tracker params — is the explicit next target. Provenance: [`results/rung3_baseline.json`](results/rung3_baseline.json).
+**Honest caveat — per-class (`scripts/11_perclass_eval.py`, dev):** the win is *people-driven*. The person class (players + goalkeepers + referees) reaches HOTA **0.64**, but the **ball only 0.12** (DetA **0.15** — rarely caught: ~10 px, fast, single-instance, ~6% of the fine-tuning boxes). Fixing ball tracking — higher-res/crop inference, ball oversampling, ball-specific tracker params — is the explicit next target. An **occlusion analysis** (`scripts/12_occlusion_eval.py`) quantifies the identity weakness: players average **2.8 tracker-IDs each** (only **26%** cleanly tracked), and identity is recovered across an occlusion gap just **~4%** of the time — the target for Rung 4 (permanence). Provenance: [`results/rung3_baseline.json`](results/rung3_baseline.json).
 
 **Rung 2 — promptable demo** (`scripts/07_promptable_demo.py`): give one object a click/box on the first frame and SAM 2 propagates the mask through the clip, rendering a *spotlight-that-object* video. Runs on Apple MPS; tracked the prompted player in 72/90 frames of a test clip.
 
