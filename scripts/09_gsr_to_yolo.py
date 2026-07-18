@@ -24,6 +24,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from pitchvision.data.export_verify import inventory_fingerprint, sha256_file
 from pitchvision.data.gsr import _bbox_xywh, _frame_index, index_gsr_sequences
 
 PERSON_CATS = {1, 2, 3}          # player, goalkeeper, referee
@@ -107,7 +108,6 @@ def main():
     counts = {"train": {"img": 0, "person": 0, "ball": 0},
               "val": {"img": 0, "person": 0, "ball": 0}}
     per_game, inventory = {}, []
-    fp = hashlib.sha256()  # fingerprint of the EXACT (subset, frame, game, label) set written
     for ci, s in enumerate(sorted(seqs, key=lambda x: x["name"])):
         gid = s["game_id"]
         subset = "val" if (ci % args.val_every == 0) else "train"
@@ -131,10 +131,13 @@ def main():
             label_txt = "\n".join(yolo_lines(meta["dim"], meta["boxes"]))
             label_txt += "\n" if label_txt else ""
             (out / "labels" / subset / f"{stem}.txt").write_text(label_txt)
-            fp.update(f"{subset}/{stem}\t{gid}\t{label_txt}".encode())
+            # per-file content hashes, so the TRAINER can re-verify the exact bytes it consumes
+            # (an export-time fingerprint alone cannot detect files added/altered afterwards)
+            inventory.append({"subset": subset, "stem": stem, "game_id": gid,
+                              "img_sha256": sha256_file(src),
+                              "label_sha256": hashlib.sha256(label_txt.encode()).hexdigest()})
             counts[subset]["img"] += 1
             per_game[gid] = per_game.get(gid, 0) + 1
-            inventory.append({"subset": subset, "stem": stem, "game_id": gid})
             for ln in label_txt.splitlines():
                 counts[subset]["ball" if ln.startswith("1 ") else "person"] += 1
 
@@ -154,7 +157,7 @@ def main():
         "requested_games": sorted(requested), "observed_games": sorted(observed),
         "per_game_frames": {g: per_game[g] for g in sorted(per_game)},
         "n_clips": len(seqs), "stride": args.stride, "val_every": args.val_every,
-        "counts": counts, "export_sha256": fp.hexdigest(),
+        "counts": counts, "export_sha256": inventory_fingerprint(inventory),
         "note": "leave-one-game-out export. observed_games == requested_games and MUST exclude the "
                 "eval game(s). export_sha256 fingerprints the exact (frame, game, label) set trained on.",
     }

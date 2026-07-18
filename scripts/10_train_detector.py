@@ -1,33 +1,31 @@
 #!/usr/bin/env python3
 """Fine-tune YOLO11 on the GSR YOLO dataset built by scripts/09 (Rung 3, 3c).
 
-Run on a CUDA GPU (rented — see handoff/rung-3/runpod-setup.md). Writes, next to the
-weights, a `train_manifest.json` that records the resolved training args, base-weight
-hash, versions/env, AND the dataset's `export_sha256` from scripts/09 — so the checkpoint
-is cryptographically tied to a *provably* leave-one-game-out training set.
+**Binds the checkpoint to the exact dataset bytes it consumed.** Before training (and again
+after) the on-disk dataset is re-hashed against `export_manifest.json` / `export_inventory.json`;
+anything missing, modified, or **extra** aborts the run. An export-time fingerprint alone cannot
+detect a frame added *afterwards* — ultralytics globs the whole tree via `data.yaml` — so without
+this preflight a checkpoint is not provably leave-one-game-out (PROJECT_PLAN §3).
+
+Writes `train_manifest.json` beside the weights: resolved args, base-weight hash, versions/env,
+the dataset `export_sha256`, the pre/post verification reports, and the **output `best.pt` SHA** —
+one unbroken chain from dataset bytes to checkpoint to metrics.
 
     python scripts/10_train_detector.py --data data/yolo_gsr_dev/data.yaml \
         --weights yolo11m.pt --epochs 60 --imgsz 1280 --device 0
-    # resume after an interruption (survives disconnects if launched under nohup/tmux):
     python scripts/10_train_detector.py --resume runs/gsr_ft/m_1280/weights/last.pt
 """
 import argparse
-import hashlib
 import json
 import platform
 import subprocess
+import sys
 from pathlib import Path
 
+import yaml
 
-def _sha256(path):
-    p = Path(path)
-    if not p.exists():
-        return None
-    h = hashlib.sha256()
-    with open(p, "rb") as f:
-        for b in iter(lambda: f.read(1 << 20), b""):
-            h.update(b)
-    return h.hexdigest()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from pitchvision.data.export_verify import format_report, sha256_file, verify_export
 
 
 def _versions(names):
@@ -50,37 +48,16 @@ def _git_sha():
         return None
 
 
-def _write_train_manifest(model, args, save_dir):
-    """Record everything needed to reproduce + prove this run, incl. the dataset fingerprint."""
-    # link to the exact scripts/09 export (its export_sha256 proves the game set)
-    export_info = None
-    try:
-        data_yaml = args.data or json.loads((Path(save_dir) / "args.yaml").read_text()).get("data")
-        if data_yaml:
-            em = Path(data_yaml).parent / "export_manifest.json"
-            if em.exists():
-                export_info = json.loads(em.read_text())
-    except Exception:
-        pass
-    resolved = {}
-    try:
-        resolved = {k: v for k, v in vars(model.trainer.args).items()}
-    except Exception:
-        pass
-    manifest = {
-        "base_weights": args.weights, "base_sha256": _sha256(args.weights),
-        "data_yaml": args.data,
-        "dataset_export": export_info,   # export_sha256 + requested/observed games + per-game frames
-        "requested": {"epochs": args.epochs, "imgsz": args.imgsz, "batch": args.batch,
-                      "workers": args.workers, "amp": args.amp, "device": args.device,
-                      "resume": args.resume},
-        "resolved_args": resolved,
-        "versions": _versions(["ultralytics", "torch", "torchvision", "numpy", "lap"]),
-        "git_sha": _git_sha(), "python": platform.python_version(), "platform": platform.platform(),
-    }
-    out = Path(save_dir) / "train_manifest.json"
-    out.write_text(json.dumps(manifest, indent=2, default=str))
-    return out, export_info
+def _data_from_resume(ckpt):
+    """Recover the data.yaml path from a run's args.yaml. NB: args.yaml is YAML, not JSON —
+    parsing it with json.loads silently fails and nulls the dataset provenance."""
+    args_yaml = Path(ckpt).resolve().parents[1] / "args.yaml"
+    if args_yaml.exists():
+        try:
+            return (yaml.safe_load(args_yaml.read_text()) or {}).get("data")
+        except Exception:
+            return None
+    return None
 
 
 def main():
@@ -99,11 +76,28 @@ def main():
                          "(low container /dev/shm deadlocks forked workers on rented pods)")
     ap.add_argument("--amp", default="true", choices=["true", "false"],
                     help="mixed precision; set false if loss/backward is NaN on very new GPUs")
-    ap.add_argument("--resume", default=None,
-                    help="resume a previous run from its last.pt (reads original args from the checkpoint)")
+    ap.add_argument("--resume", default=None, help="resume from a run's last.pt")
+    ap.add_argument("--skip-verify", action="store_true",
+                    help="train even if the dataset fails verification (the checkpoint will NOT be "
+                         "provably leave-one-game-out; recorded as such in the manifest)")
     args = ap.parse_args()
 
     from ultralytics import YOLO
+
+    data_yaml = args.data or (_data_from_resume(args.resume) if args.resume else None)
+    dataset_dir = Path(data_yaml).parent if data_yaml else None
+
+    # ---- PREFLIGHT: dataset on disk must be byte-identical to its manifest ----
+    pre = None
+    if dataset_dir:
+        pre = verify_export(dataset_dir)
+        print(f"[preflight] {format_report(pre)}", flush=True)
+        if not pre["ok"] and not args.skip_verify:
+            sys.exit("ABORTING: the dataset does not match its export manifest (above). Rebuild it with "
+                     "`scripts/09_gsr_to_yolo.py --overwrite`, or pass --skip-verify to train anyway "
+                     "(the checkpoint will NOT be provably leave-one-game-out).")
+    else:
+        print("[preflight] WARNING: no data.yaml resolved — dataset provenance NOT captured.", flush=True)
 
     if args.resume:
         model = YOLO(args.resume)
@@ -126,16 +120,45 @@ def main():
 
     save_dir = Path(model.trainer.save_dir)
     best = save_dir / "weights" / "best.pt"
-    man_path, export_info = _write_train_manifest(model, args, save_dir)
+
+    # ---- POSTFLIGHT: catch anything that changed *during* the run ----
+    post = verify_export(dataset_dir) if dataset_dir else None
+    if post:
+        print(f"[postflight] {format_report(post)}", flush=True)
+
+    export_info = None
+    if dataset_dir and (dataset_dir / "export_manifest.json").exists():
+        export_info = json.loads((dataset_dir / "export_manifest.json").read_text())
+    resolved = {}
+    try:
+        resolved = {k: v for k, v in vars(model.trainer.args).items()}
+    except Exception:
+        pass
+
+    manifest = {
+        "base_weights": args.weights, "base_sha256": sha256_file(args.weights) if Path(args.weights).exists() else None,
+        "data_yaml": data_yaml,
+        "dataset_export": export_info,
+        "dataset_verified_pre": pre, "dataset_verified_post": post,
+        "provably_leave_one_game_out": bool(pre and pre.get("ok") and post and post.get("ok")),
+        "output_best_sha256": sha256_file(best) if best.exists() else None,
+        "requested": {"epochs": args.epochs, "imgsz": args.imgsz, "batch": args.batch,
+                      "workers": args.workers, "amp": args.amp, "device": args.device,
+                      "resume": args.resume, "skip_verify": args.skip_verify},
+        "resolved_args": resolved,
+        "versions": _versions(["ultralytics", "torch", "torchvision", "numpy", "lap"]),
+        "git_sha": _git_sha(), "python": platform.python_version(), "platform": platform.platform(),
+    }
+    man_path = save_dir / "train_manifest.json"
+    man_path.write_text(json.dumps(manifest, indent=2, default=str))
+
     print(f"\nDONE. best weights -> {best}")
     print(f"train manifest -> {man_path}")
-    if export_info:
-        print(f"  dataset: games {export_info.get('observed_games')} "
-              f"(export_sha256 {str(export_info.get('export_sha256'))[:16]}…) — provably leave-one-game-out")
-    else:
-        print("  WARNING: no export_manifest.json beside data.yaml — dataset provenance NOT captured. "
-              "Rebuild the set with the current scripts/09 (it emits one).")
-    print("Bring HOME: best.pt + train_manifest.json + the dataset's export_manifest.json.")
+    print(f"  provably leave-one-game-out: {manifest['provably_leave_one_game_out']}"
+          + (f"  (games {export_info.get('observed_games')}, export_sha256 "
+             f"{str(export_info.get('export_sha256'))[:16]}…)" if export_info else ""))
+    print(f"  best.pt sha256: {str(manifest['output_best_sha256'])[:16]}…")
+    print("Bring HOME: best.pt + train_manifest.json + the dataset's export_manifest.json + export_inventory.json.")
     print("Evaluate (same sealed eval as the baseline):")
     print(f"  python scripts/06_gsr_baseline_eval.py --weights {best} --classes 0,1 \\")
     print(f"    --tracker configs/trackers/botsort_newtrk040.yaml --split test --out-dir outputs/gsr_ft_dev")

@@ -1,0 +1,23 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+#
+# EXPERIMENTAL (Rung 3 ball investigation): ball-friendly thresholds.
+# Hypothesis: the 3a winner (new_track_thresh=0.40) plus detector conf=0.25 suppress the
+# ball outright — the ball is ~10 px, so its detections are low-confidence, and a 0.40 gate
+# means a ball track can rarely even start. This config lowers the track-creation and
+# match thresholds so weak ball detections survive. Paired with --conf 0.10 at inference.
+# Compare per-class ball HOTA vs botsort_newtrk040.yaml on the SAME dev clips.
+
+tracker_type: botsort
+track_high_thresh: 0.15   # was 0.25 — keep weak (small-object) detections in stage 1
+track_low_thresh: 0.05    # was 0.10
+new_track_thresh: 0.15    # was 0.40 — the suspected ball suppressor
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: True
+
+gmc_method: sparseOptFlow
+
+proximity_thresh: 0.5
+appearance_thresh: 0.8
+with_reid: False          # the ball is a featureless blob — appearance is useless for it
+model: auto
