@@ -94,7 +94,15 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--stride", type=int, default=1,
                     help="keep every Nth frame (1 = all; adjacent frames are highly correlated so >1 trades data for speed)")
-    ap.add_argument("--val-every", type=int, default=10, help="hold out every Nth clip as training val")
+    ap.add_argument("--val-games", default="",
+                    help="comma-sep game_ids used ONLY for validation (cross-match val). Clips from "
+                         "these games go to val, everything else to train. Without this, val is every "
+                         "Nth clip of the SAME matches — which measures 'did it learn these matches', "
+                         "not 'does it generalise to a new one'.")
+    ap.add_argument("--val-stride", type=int, default=10,
+                    help="frame stride for val games (validation runs every epoch; a full match is wasteful)")
+    ap.add_argument("--val-every", type=int, default=10,
+                    help="fallback when --val-games is empty: hold out every Nth clip as val")
     ap.add_argument("--copy", action="store_true", help="copy images instead of symlinking")
     ap.add_argument("--overwrite", action="store_true", help="atomically rebuild --out if it already exists")
     args = ap.parse_args()
@@ -120,14 +128,19 @@ def main():
 
     counts = {sub: {"img": 0, **{v: 0 for v in CLASS_KEYS.values()}} for sub in ("train", "val")}
     per_game, inventory = {}, []
+    val_games = {g.strip() for g in args.val_games.split(",") if g.strip()}
+    if val_games and not val_games < requested:
+        sys.exit(f"--val-games {sorted(val_games)} must be a subset of --games {sorted(requested)}")
     for ci, s in enumerate(sorted(seqs, key=lambda x: x["name"])):
         gid = s["game_id"]
-        subset = "val" if (ci % args.val_every == 0) else "train"
+        subset = ("val" if gid in val_games else "train") if val_games \
+            else ("val" if (ci % args.val_every == 0) else "train")
+        stride = args.val_stride if subset == "val" else args.stride
         (out / "images" / subset).mkdir(parents=True, exist_ok=True)
         (out / "labels" / subset).mkdir(parents=True, exist_ok=True)
         img_dir = Path(s["path"]) / "img1"
         for fr, meta in sorted(build(s["labels"]).items()):
-            if fr % args.stride != 0:
+            if fr % stride != 0:
                 continue
             src = img_dir / Path(meta["file"]).name
             if not src.exists():
@@ -170,7 +183,10 @@ def main():
         "classes": NAMES,
         "requested_games": sorted(requested), "observed_games": sorted(observed),
         "per_game_frames": {g: per_game[g] for g in sorted(per_game)},
-        "n_clips": len(seqs), "stride": args.stride, "val_every": args.val_every,
+        "n_clips": len(seqs), "stride": args.stride,
+        "val_games": sorted(val_games), "val_stride": args.val_stride if val_games else None,
+        "val_every": None if val_games else args.val_every,
+        "val_protocol": "cross-match (val games held out entirely)" if val_games else "same-match (every Nth clip)",
         "counts": counts, "export_sha256": inventory_fingerprint(inventory),
         "note": "leave-one-game-out export. observed_games == requested_games and MUST exclude the "
                 "eval game(s). export_sha256 fingerprints the exact (frame, game, label) set trained on.",
@@ -180,8 +196,9 @@ def main():
 
     print(f"games written: {sorted(observed)} == requested {sorted(requested)}  ({len(seqs)} clips, stride {args.stride})")
     print(f"  per-game frames: {manifest['per_game_frames']}")
-    print(f"  train: {counts['train']['img']:6d} imgs | {counts['train']['person']} person | {counts['train']['ball']} ball")
-    print(f"  val:   {counts['val']['img']:6d} imgs | {counts['val']['person']} person | {counts['val']['ball']} ball")
+    for sub in ("train", "val"):
+        cls_bits = " | ".join(f"{counts[sub][v]} {v}" for v in CLASS_KEYS.values())
+        print(f"  {sub:5}: {counts[sub]['img']:6d} imgs | {cls_bits}")
     print(f"  export_sha256 {manifest['export_sha256'][:16]}…  ->  {out}/export_manifest.json")
     if counts["val"]["img"] == 0:
         print("WARNING: empty val set — lower --val-every or add clips")
