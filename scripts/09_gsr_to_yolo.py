@@ -4,18 +4,21 @@
 **Leave-one-game-out by construction:** pass only the games DISJOINT from the eval
 game via --games, so the fine-tuned detector never sees a frame from its evaluation
 game. This is the same anti-leakage invariant (PROJECT_PLAN §3) enforced everywhere else.
-    Rung-3 actual recipe:  --source-split train --games 6,9
+    Current recipe:  --games 3,5,6,9   (games 3,5 live in `valid`, games 6,9 in `train`)
     -> ONE model, disjoint from BOTH eval games (train game 4 = dev, valid game 2 = sealed
-       final), so dev and final are scored by the *identical* checkpoint. A separate
-       {4,6,9} "final" detector is deliberately NOT used: it would make dev and final
-       different models and break that matching.
+       final), so dev and final are scored by the *identical* checkpoint. Games 3 and 5 were
+       previously unused; adding them ~doubles the match diversity while keeping games 4 and 2
+       untouched. NB: this deliberately departs from SoccerNet's split convention (it trains on
+       part of `valid`) — leak-free under OUR protocol, but disclose it before comparing against
+       published SoccerNet numbers.
 
-Classes: 0=person (GSR player/GK/referee = cats 1,2,3), 1=ball (cat 4). GSR cat 7
-"other" (~0.5%, ambiguous) and non-object cats (pitch/camera) are excluded from
-detector training — those objects are still counted in the tracking GT, so dev/final
-eval stays apples-to-apples with the COCO baseline (which also doesn't special-case them).
+Classes are the GSR roles: 0=player, 1=goalkeeper, 2=referee, 3=ball. Role generalises across
+matches, so the detector can learn it; TEAM does not (kits change every match) and stays a
+per-match clustering problem. GSR cat 7 "other" (~0.5%, ambiguous) and non-object cats
+(pitch/camera) are excluded from training — still counted in the tracking GT, so eval stays
+apples-to-apples with the baseline.
 
-    python scripts/09_gsr_to_yolo.py --source-split train --games 6,9 --out data/yolo_gsr_dev
+    python scripts/09_gsr_to_yolo.py --games 3,5,6,9 --out data/yolo_gsr_big
 """
 import argparse
 import hashlib
@@ -30,10 +33,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pitchvision.data.export_verify import inventory_fingerprint, sha256_file
 from pitchvision.data.gsr import _bbox_xywh, _frame_index, index_gsr_sequences
 
-PERSON_CATS = {1, 2, 3}          # player, goalkeeper, referee
-BALL_CAT = 4
-CLASS_OF = {**{c: 0 for c in PERSON_CATS}, BALL_CAT: 1}
-NAMES = {0: "person", 1: "ball"}
+# GSR category ids ARE the roles: 1 player, 2 goalkeeper, 3 referee, 4 ball.
+# Role generalises across matches (a referee looks like a referee everywhere), so the detector
+# can learn it. TEAM does not — kits change every match — so team stays a per-match clustering
+# problem (see src/pitchvision/demo/teams.py). Learning role also lets the demo exclude
+# officials from that clustering instead of letting them corrupt it.
+CLASS_OF = {1: 0, 2: 1, 3: 2, 4: 3}
+NAMES = {0: "player", 1: "goalkeeper", 2: "referee", 3: "ball"}
+CLASS_KEYS = {0: "player", 1: "goalkeeper", 2: "referee", 3: "ball"}
 
 
 def build(labels_json):
@@ -80,12 +87,13 @@ def yolo_lines(dim, boxes):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", default="data/soccernet-gsr")
-    ap.add_argument("--source-split", default="train", choices=["train", "valid"])
+    ap.add_argument("--source-splits", default="train,valid",
+                    help="comma-separated GSR splits to draw games from (games 3,5 live in `valid`)")
     ap.add_argument("--games", required=True,
                     help="comma-sep game_ids to INCLUDE — MUST exclude the eval game (leave-one-game-out)")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--stride", type=int, default=5,
-                    help="keep every Nth frame (adjacent frames are near-duplicates; 5 => ~150/clip)")
+    ap.add_argument("--stride", type=int, default=1,
+                    help="keep every Nth frame (1 = all; adjacent frames are highly correlated so >1 trades data for speed)")
     ap.add_argument("--val-every", type=int, default=10, help="hold out every Nth clip as training val")
     ap.add_argument("--copy", action="store_true", help="copy images instead of symlinking")
     ap.add_argument("--overwrite", action="store_true", help="atomically rebuild --out if it already exists")
@@ -103,13 +111,14 @@ def main():
                      f"Pass --overwrite to rebuild it, or choose a fresh --out.")
         shutil.rmtree(out)
 
-    seqs = [s for s in index_gsr_sequences(args.data_dir, split=args.source_split, require_game_id=True)
+    _splits = [x.strip() for x in args.source_splits.split(",") if x.strip()]
+    seqs = [s for sp in _splits
+            for s in index_gsr_sequences(args.data_dir, split=sp, require_game_id=True)
             if s["game_id"] in requested]
     if not seqs:
-        sys.exit(f"no sequences in split={args.source_split} with game_id in {sorted(requested)}")
+        sys.exit(f"no sequences in splits={_splits} with game_id in {sorted(requested)}")
 
-    counts = {"train": {"img": 0, "person": 0, "ball": 0},
-              "val": {"img": 0, "person": 0, "ball": 0}}
+    counts = {sub: {"img": 0, **{v: 0 for v in CLASS_KEYS.values()}} for sub in ("train", "val")}
     per_game, inventory = {}, []
     for ci, s in enumerate(sorted(seqs, key=lambda x: x["name"])):
         gid = s["game_id"]
@@ -142,7 +151,7 @@ def main():
             counts[subset]["img"] += 1
             per_game[gid] = per_game.get(gid, 0) + 1
             for ln in label_txt.splitlines():
-                counts[subset]["ball" if ln.startswith("1 ") else "person"] += 1
+                counts[subset][CLASS_KEYS.get(int(ln.split()[0]), "player")] += 1
 
     # ASSERT the frames written come from EXACTLY the requested games — nothing more, nothing less.
     observed = set(per_game)
@@ -156,7 +165,9 @@ def main():
         {"path": str(out.resolve()), "train": "images/train", "val": "images/val", "names": NAMES},
         sort_keys=False))
     manifest = {
-        "source_split": args.source_split,
+        "source_splits": _splits,
+        "game_source_split": {g: sp for sp, g in sorted({(x["split"], x["game_id"]) for x in seqs})},
+        "classes": NAMES,
         "requested_games": sorted(requested), "observed_games": sorted(observed),
         "per_game_frames": {g: per_game[g] for g in sorted(per_game)},
         "n_clips": len(seqs), "stride": args.stride, "val_every": args.val_every,

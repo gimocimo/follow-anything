@@ -17,7 +17,8 @@ SHA_A, SHA_B, SHA_C = "a" * 64, "b" * 64, "c" * 64
 
 
 def _artifacts():
-    em = {"observed_games": ["6", "9"], "requested_games": ["6", "9"], "export_sha256": SHA_A}
+    em = {"observed_games": ["3", "5", "6", "9"], "requested_games": ["3", "5", "6", "9"],
+          "export_sha256": SHA_A}
     tm = {"dataset_export": {"export_sha256": SHA_A},
           "dataset_verified_pre": {"ok": True}, "dataset_verified_post": {"ok": True},
           "data_yaml_problems": [], "loader_guard": {"ok": True},
@@ -58,11 +59,21 @@ def test_malformed_hash_fails_closed():
     assert links["train_manifest_binds_output_checkpoint"] is False
 
 
+def test_stale_game_set_fails():
+    """An export that does not match the intended recipe (e.g. the old {6,9}) must not pass —
+    otherwise a superseded dataset could quietly back a current claim."""
+    tm, em, dev, fin = _artifacts()
+    em["observed_games"] = ["6", "9"]
+    em["requested_games"] = ["6", "9"]
+    links, _ = mr.leak_free_links(tm, em, dev, fin)
+    assert links["export_games_are_exactly_train_games"] is False
+
+
 def test_contaminated_game_set_fails():
     """An export containing the dev eval game can never be 'provably leave-one-game-out'."""
     tm, em, dev, fin = _artifacts()
-    em["observed_games"] = ["4", "6", "9"]
-    em["requested_games"] = ["4", "6", "9"]
+    em["observed_games"] = ["3", "4", "5", "6", "9"]
+    em["requested_games"] = ["3", "4", "5", "6", "9"]
     links, _ = mr.leak_free_links(tm, em, dev, fin)
     assert links["eval_games_excluded_from_training"] is False
     assert not all(links.values())

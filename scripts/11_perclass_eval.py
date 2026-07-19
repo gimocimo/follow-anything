@@ -23,12 +23,19 @@ from pitchvision.data.gsr import gsr_to_mot_rows
 from pitchvision.eval.mot_eval import evaluate, write_gt, write_tracker
 from pitchvision.pipeline.run_video import _resolve_tracker
 
-# detector class id -> GT categories. Fine-tuned GSR model: 0=person, 1=ball.
-GROUPS = {
-    "all":    {"det_cls": {0, 1}, "gt_cats": None},        # None -> all object cats (== scripts/06)
-    "person": {"det_cls": {0},    "gt_cats": {1, 2, 3}},   # player / GK / referee
-    "ball":   {"det_cls": {1},    "gt_cats": {4}},
-}
+PERSON_NAMES = {"person", "player", "goalkeeper", "referee"}
+
+
+def groups_for(names: dict):
+    """Build det-class -> GT-category groups from the MODEL's own class names, so this works
+    with the 2-class (person, ball) and 4-class (player, goalkeeper, referee, ball) schemes."""
+    person = {i for i, n in names.items() if str(n).lower() in PERSON_NAMES}
+    ball = {i for i, n in names.items() if str(n).lower() == "ball"}
+    return {
+        "all":    {"det_cls": person | ball, "gt_cats": None},     # None -> all object cats (== 06)
+        "person": {"det_cls": person,        "gt_cats": {1, 2, 3}},
+        "ball":   {"det_cls": ball,          "gt_cats": {4}},
+    }
 
 
 def track_with_class(img_dir, weights, classes, conf, imgsz, tracker, device):
@@ -77,6 +84,9 @@ def main():
     if args.max_seqs:
         seqs = seqs[: args.max_seqs]
     classes = tuple(int(c) for c in args.classes.split(","))
+    from ultralytics import YOLO
+    GROUPS = groups_for(YOLO(args.weights).names)
+    print(f"  class scheme: {GROUPS['person']['det_cls']} -> person, {GROUPS['ball']['det_cls']} -> ball", flush=True)
 
     # 1) inference once per sequence (capturing class), reused for every group
     all_tracks, seq_lengths = {}, {}
