@@ -31,9 +31,37 @@
         "ball": 575
       }
     },
-    "export_sha256": "1dcf475bfdb67bdd9a4a6d215213bd002d7541de56bd6e18b95e014028ecedbb",
+    "export_sha256": "f313f3a745730572c896ea353f3820851df0c4047bea9579fdb14642d72005b2",
     "note": "leave-one-game-out export. observed_games == requested_games and MUST exclude the eval game(s). export_sha256 fingerprints the exact (frame, game, label) set trained on."
   },
+  "dataset_verified_pre": {
+    "ok": true,
+    "missing": [],
+    "modified": [],
+    "extra": [],
+    "fingerprint_match": true,
+    "n_expected": 5850,
+    "export_sha256": "f313f3a745730572c896ea353f3820851df0c4047bea9579fdb14642d72005b2",
+    "games": [
+      "6",
+      "9"
+    ]
+  },
+  "dataset_verified_post": {
+    "ok": true,
+    "missing": [],
+    "modified": [],
+    "extra": [],
+    "fingerprint_match": true,
+    "n_expected": 5850,
+    "export_sha256": "f313f3a745730572c896ea353f3820851df0c4047bea9579fdb14642d72005b2",
+    "games": [
+      "6",
+      "9"
+    ]
+  },
+  "provably_leave_one_game_out": true,
+  "output_best_sha256": "3c45e3d4e78c366c1954e8f6eae98dba4d19514088924cefbc8fc17f6a867cd4",
   "requested": {
     "epochs": 60,
     "imgsz": 1280,
@@ -41,7 +69,8 @@
     "workers": 2,
     "amp": "true",
     "device": "0",
-    "resume": null
+    "resume": null,
+    "skip_verify": false
   },
   "resolved_args": {
     "task": "detect",
@@ -158,13 +187,13 @@
     "save_dir": "/follow-anything/runs/gsr_ft/m_1280"
   },
   "versions": {
-    "ultralytics": "8.4.98",
+    "ultralytics": "8.4.100",
     "torch": "2.8.0+cu128",
     "torchvision": "0.23.0+cu128",
     "numpy": "2.1.2",
     "lap": "0.5.13"
   },
-  "git_sha": "5dfc8c9fdbf262320c15f032f63b76e575197126",
+  "git_sha": "55287fc107e70a4f5d875d19cf6c5944925d52d1",
   "python": "3.12.3",
-  "platform": "Linux-6.8.0-90-generic-x86_64-with-glibc2.39"
+  "platform": "Linux-6.8.0-87-generic-x86_64-with-glibc2.39"
 }

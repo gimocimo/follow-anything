@@ -27,6 +27,6 @@
       "ball": 575
     }
   },
-  "export_sha256": "1dcf475bfdb67bdd9a4a6d215213bd002d7541de56bd6e18b95e014028ecedbb",
+  "export_sha256": "f313f3a745730572c896ea353f3820851df0c4047bea9579fdb14642d72005b2",
   "note": "leave-one-game-out export. observed_games == requested_games and MUST exclude the eval game(s). export_sha256 fingerprints the exact (frame, game, label) set trained on."
 }

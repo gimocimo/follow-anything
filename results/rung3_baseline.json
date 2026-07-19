@@ -6,13 +6,13 @@
       "6",
       "9"
     ],
-    "export_sha256": "1dcf475bfdb67bdd9a4a6d215213bd002d7541de56bd6e18b95e014028ecedbb",
+    "export_sha256": "f313f3a745730572c896ea353f3820851df0c4047bea9579fdb14642d72005b2",
     "train_manifest_links_export": true,
-    "dataset_verified_before_training": false,
-    "dataset_verified_after_training": false,
-    "provably_leave_one_game_out": false,
-    "weights_sha256": "d3115ca573ff8d4e9033d1068ff5d8c726d894475c7f8ea6c7caea874eff81bd",
-    "train_manifest_binds_output_checkpoint": false,
+    "dataset_verified_before_training": true,
+    "dataset_verified_after_training": true,
+    "provably_leave_one_game_out": true,
+    "weights_sha256": "3c45e3d4e78c366c1954e8f6eae98dba4d19514088924cefbc8fc17f6a867cd4",
+    "train_manifest_binds_output_checkpoint": true,
     "dev_and_final_same_checkpoint": true
   },
   "tracker": {
@@ -23,16 +23,16 @@
     "eval_game": "4",
     "n_seqs": 18,
     "metrics": {
-      "HOTA": 0.6248171947164387,
-      "DetA": 0.719491390482907,
-      "AssA": 0.5433586414865176,
+      "HOTA": 0.6248174542300443,
+      "DetA": 0.7194916898355669,
+      "AssA": 0.5433588600888222,
       "MOTA": 0.884822194755198,
       "IDF1": 0.725112786208262,
       "IDSW": 977
     },
     "baseline_HOTA": 0.4814830134807477,
-    "delta_HOTA": 0.14333418123569103,
-    "git_sha": "5dfc8c9fdbf262320c15f032f63b76e575197126"
+    "delta_HOTA": 0.14333444074929663,
+    "git_sha": "55287fc107e70a4f5d875d19cf6c5944925d52d1"
   },
   "final": {
     "eval_game": "2",
@@ -48,21 +48,21 @@
     "baseline_HOTA": 0.49209979323992903,
     "delta_HOTA": 0.10434741586574825,
     "gate": "beat 0.49209979323992903 -> MET",
-    "git_sha": "5dfc8c9fdbf262320c15f032f63b76e575197126"
+    "git_sha": "55287fc107e70a4f5d875d19cf6c5944925d52d1"
   },
   "per_class_dev": {
     "all": {
-      "HOTA": 0.6248171947164387,
-      "DetA": 0.719491390482907,
-      "AssA": 0.5433586414865176,
+      "HOTA": 0.6248174542300443,
+      "DetA": 0.7194916898355669,
+      "AssA": 0.5433588600888222,
       "MOTA": 0.884822194755198,
       "IDF1": 0.725112786208262,
       "IDSW": 977
     },
     "person": {
-      "HOTA": 0.6419270921764976,
-      "DetA": 0.7524254099095721,
-      "AssA": 0.5483516061377681,
+      "HOTA": 0.6419273584706595,
+      "DetA": 0.7524257245964606,
+      "AssA": 0.5483518247626903,
       "MOTA": 0.9299716973278948,
       "IDF1": 0.7458007094323493,
       "IDSW": 870
@@ -76,11 +76,75 @@
       "IDSW": 105
     }
   },
-  "occlusion_dev": null,
+  "occlusion_dev": {
+    "occlusion_episodes": {
+      "n": 1510,
+      "both_endpoints": 1282,
+      "retained": 1166,
+      "switched": 116,
+      "one_or_no_endpoint": 228,
+      "endpoint_coverage": 0.8490066225165563,
+      "conditional_same_id_retention": 0.9095163806552262
+    },
+    "fragmentation": {
+      "mean_ids_per_gt": 2.7900943396226414,
+      "single_id": 112,
+      "n_gt_track_instances": 424
+    },
+    "visibility_gaps": {
+      "interior": 2,
+      "frame_edge": 25,
+      "note": "edge gaps are exits/re-entries, not occlusions"
+    },
+    "params": {
+      "occ_thr": 0.3,
+      "iou_thr": 0.5,
+      "edge_px": 8.0,
+      "max_len": 30
+    },
+    "provenance": {
+      "git_sha": "55287fc107e70a4f5d875d19cf6c5944925d52d1",
+      "python": "3.12.3",
+      "platform": "Linux-6.8.0-87-generic-x86_64-with-glibc2.39",
+      "split": {
+        "file": "outputs/gsr_splits.json",
+        "name": "test",
+        "n_seqs": 18
+      },
+      "detector": {
+        "weights": "runs/gsr_ft/m_1280/weights/best.pt",
+        "sha256": "3c45e3d4e78c366c1954e8f6eae98dba4d19514088924cefbc8fc17f6a867cd4",
+        "imgsz": 1280,
+        "conf": 0.25,
+        "classes": "0,1"
+      },
+      "tracker": {
+        "requested": "configs/trackers/botsort_newtrk040.yaml",
+        "resolved": "configs/trackers/botsort_newtrk040.yaml",
+        "sha256": "badb024982cea5cff3b2b8d670d5e7e6f922164fc2bc4bce4f8d53274d26d92a"
+      },
+      "args": {
+        "splits_file": "outputs/gsr_splits.json",
+        "split": "test",
+        "weights": "runs/gsr_ft/m_1280/weights/best.pt",
+        "classes": "0,1",
+        "imgsz": 1280,
+        "conf": 0.25,
+        "tracker": "configs/trackers/botsort_newtrk040.yaml",
+        "device": "auto",
+        "max_seqs": null,
+        "occ_thr": 0.3,
+        "iou_thr": 0.5,
+        "edge_px": 8.0,
+        "max_len": 30,
+        "out_dir": "outputs/gsr_ft_dev"
+      }
+    }
+  },
   "packages": {
     "torch": "2.8.0+cu128",
     "torchvision": "0.23.0+cu128",
-    "ultralytics": "8.4.98",
+    "ultralytics": "8.4.100",
     "numpy": "2.1.2",
     "opencv-python": "5.0.0.93",
     "scipy": "1.18.0",
