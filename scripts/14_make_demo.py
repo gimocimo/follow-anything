@@ -28,75 +28,15 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pitchvision.config import get_device
+from pitchvision.demo.teams import assign_teams, torso_color
 from pitchvision.pipeline.run_video import _resolve_tracker
 
 TEAM_BGR = [(64, 64, 232), (232, 150, 64)]      # kit A (red), kit B (blue)
-OTHER_BGR = (60, 220, 240)                       # goalkeeper / referee / uncertain
+OTHER_BGR = (60, 220, 240)                       # uncertain kit
+GK_BGR = (80, 220, 120)                          # goalkeeper (predicted role)
+REF_BGR = (40, 200, 250)                         # referee (predicted role)
 BALL_BGR = (0, 240, 255)
-
-
-def torso_color(frame, box, min_h=26):
-    """Median Lab colour of the torso patch (skips head, shorts, grass)."""
-    x1, y1, x2, y2 = box
-    h, w = y2 - y1, x2 - x1
-    if h < min_h or w < 8:
-        return None
-    ty1, ty2 = int(y1 + 0.15 * h), int(y1 + 0.45 * h)
-    tx1, tx2 = int(x1 + 0.25 * w), int(x1 + 0.75 * w)
-    patch = frame[max(0, ty1):max(0, ty2), max(0, tx1):max(0, tx2)]
-    if patch.size == 0:
-        return None
-    lab = cv2.cvtColor(patch, cv2.COLOR_BGR2LAB).reshape(-1, 3).astype(np.float32)
-    return np.median(lab, axis=0)
-
-
-def _kmeans(X, init, iters=40):
-    C = np.asarray(init, dtype=np.float32).copy()
-    k = len(C)
-    lab = np.zeros(len(X), dtype=int)
-    for _ in range(iters):
-        lab = ((X[:, None, :] - C[None, :, :]) ** 2).sum(-1).argmin(1)
-        for c in range(k):
-            if (lab == c).any():
-                C[c] = X[lab == c].mean(0)
-    return lab, C, float(((X - C[lab]) ** 2).sum())
-
-
-def _best_kmeans(X, k, restarts=15, seed=0):
-    """k-means with multiple random seedings, keeping the lowest-inertia solution."""
-    rng = np.random.default_rng(seed)
-    best = None
-    for _ in range(restarts):
-        init = X[rng.choice(len(X), k, replace=False)]
-        lab, C, inertia = _kmeans(X, init)
-        if best is None or inertia < best[2]:
-            best = (lab, C, inertia)
-    return best[0], best[1]
-
-
-def assign_teams(track_colors, min_samples=3, k=3):
-    """track_id -> 0 | 1 | None(other=GK/referee).
-
-    Clusters PER-TRACK mean torso colour in CHROMA space (Lab a*/b* only — luminance mostly
-    encodes lighting/shadow and would split players by how sunlit they are, not by kit).
-
-    Uses **k=3, then takes the two largest clusters as the teams**. k=2 is the wrong model
-    for football: a referee's kit is often *further* from both teams than the teams are from
-    each other, so 2-means correctly-but-uselessly splits {both teams} vs {referee}. Three
-    groups (team, team, officials) matches reality; anything outside the two biggest is drawn
-    as "other".
-    """
-    means = {t: np.mean(v, axis=0) for t, v in track_colors.items() if len(v) >= min_samples}
-    if len(means) < 6:
-        return {}
-    tids = list(means)
-    X = np.stack([means[t] for t in tids])[:, 1:].astype(np.float32)   # a*, b* only
-    k = min(k, len(X))
-    lab, C = _best_kmeans(X, k)
-    sizes = [(lab == c).sum() for c in range(k)]
-    teams = list(np.argsort(sizes)[::-1][:2])          # two largest clusters = the two squads
-    remap = {int(c): (0 if c == teams[0] else 1) for c in teams}
-    return {t: remap.get(int(lab[i])) for i, t in enumerate(tids)}
+PERSON_NAMES = {"person", "player", "goalkeeper", "referee"}
 
 
 def draw_header(img, title, sub):
@@ -144,6 +84,11 @@ def main():
         conf=args.conf, imgsz=args.imgsz, tracker=_resolve_tracker(args.tracker),
         persist=True, stream=True, device=get_device(args.device), verbose=False,
     )
+    names = {int(k): str(v).lower() for k, v in model.names.items()}
+    role_of = {i: names[i] for i in names}
+    ball_ids = {i for i, nm in names.items() if nm == "ball"}
+    player_ids = {i for i, nm in names.items() if nm in ("player", "person")}
+    print(f"  classes: {names}", flush=True)
     cached, track_colors, n = [], defaultdict(list), 0
     for r in results:
         if n >= args.max_frames:
@@ -158,7 +103,7 @@ def main():
             for (x1, y1, x2, y2), tid, c in zip(xyxy, ids, cls):
                 box = (int(x1), int(y1), int(x2), int(y2))
                 dets.append((int(tid), int(c), box))
-                if c == 0 and frame is not None:
+                if c in player_ids and frame is not None:
                     col = torso_color(frame, box)
                     if col is not None:
                         track_colors[int(tid)].append(col)
@@ -180,15 +125,21 @@ def main():
             continue
         live = 0
         for tid, c, (x1, y1, x2, y2) in dets:
-            if c == 1:
+            if c in ball_ids:
                 cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                 cv2.circle(frame, (cx, cy), 13, BALL_BGR, 2, cv2.LINE_AA)
                 cv2.putText(frame, "ball", (cx + 16, cy - 8), cv2.FONT_HERSHEY_SIMPLEX,
                             0.5, BALL_BGR, 1, cv2.LINE_AA)
                 continue
             live += 1
-            t = team_of.get(tid, None)
-            col = TEAM_BGR[t] if t in (0, 1) else OTHER_BGR
+            role = role_of.get(c, "player")
+            if role == "goalkeeper":
+                col = GK_BGR
+            elif role == "referee":
+                col = REF_BGR
+            else:
+                t = team_of.get(tid, None)
+                col = TEAM_BGR[t] if t in (0, 1) else OTHER_BGR
             cv2.rectangle(frame, (x1, y1), (x2, y2), col, 2, cv2.LINE_AA)
             lab = str(tid)
             (tw, th), _ = cv2.getTextSize(lab, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
@@ -201,7 +152,7 @@ def main():
                 for i in range(1, len(pts)):
                     cv2.line(frame, pts[i - 1], pts[i], col, max(1, int(3 * i / len(pts))), cv2.LINE_AA)
 
-        sub = ("fine-tuned YOLO11m + BoT-SORT  |  teams auto-assigned from kit colour  |  "
+        sub = ("fine-tuned YOLO11 + BoT-SORT  |  roles predicted, teams clustered from kit colour  |  "
                f"{clip.name} — held-out match (never trained on)")
         draw_header(frame, f"follow-anything  |  {live} players tracked simultaneously", sub)
         if args.scale != 1.0:
