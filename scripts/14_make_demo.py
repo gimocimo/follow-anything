@@ -50,61 +50,53 @@ def torso_color(frame, box, min_h=26):
     return np.median(lab, axis=0)
 
 
-def _kmeans2(X, init, iters=40):
+def _kmeans(X, init, iters=40):
     C = np.asarray(init, dtype=np.float32).copy()
+    k = len(C)
     lab = np.zeros(len(X), dtype=int)
     for _ in range(iters):
         lab = ((X[:, None, :] - C[None, :, :]) ** 2).sum(-1).argmin(1)
-        for k in (0, 1):
-            if (lab == k).any():
-                C[k] = X[lab == k].mean(0)
+        for c in range(k):
+            if (lab == c).any():
+                C[c] = X[lab == c].mean(0)
     return lab, C, float(((X - C[lab]) ** 2).sum())
 
 
-def _best_split(X, restarts=12, seed=0, min_balance=0.15):
-    """2-means over several seedings, rejecting degenerate splits.
-
-    Seeding on the two most-distant points is fragile: one shadowed player or a referee
-    becomes its own "team" and everyone else collapses into the other. Football gives a
-    strong prior — two squads of roughly equal size — so a 95/5 split is almost certainly
-    an outlier artefact, not two kits. Fall back to a median split on the dominant colour
-    axis if every seeding degenerates.
-    """
+def _best_kmeans(X, k, restarts=15, seed=0):
+    """k-means with multiple random seedings, keeping the lowest-inertia solution."""
     rng = np.random.default_rng(seed)
-    d = ((X[:, None, :] - X[None, :, :]) ** 2).sum(-1)
-    i, j = np.unravel_index(np.argmax(d), d.shape)
-    inits = [np.stack([X[i], X[j]])] + [X[rng.choice(len(X), 2, replace=False)] for _ in range(restarts)]
     best = None
-    for init in inits:
-        lab, C, inertia = _kmeans2(X, init)
-        if min((lab == 0).sum(), (lab == 1).sum()) / len(X) < min_balance:
-            continue
+    for _ in range(restarts):
+        init = X[rng.choice(len(X), k, replace=False)]
+        lab, C, inertia = _kmeans(X, init)
         if best is None or inertia < best[2]:
             best = (lab, C, inertia)
-    if best is not None:
-        return best[0], best[1]
-    v = X - X.mean(0)                      # fallback: split on the principal colour axis
-    pc = np.linalg.svd(v, full_matrices=False)[2][0]
-    proj = v @ pc
-    lab = (proj > np.median(proj)).astype(int)
-    return lab, np.stack([X[lab == 0].mean(0), X[lab == 1].mean(0)])
+    return best[0], best[1]
 
 
-def assign_teams(track_colors, min_samples=3):
-    """track_id -> 0 | 1 | None(other). Clusters PER-TRACK mean colours in CHROMA space.
+def assign_teams(track_colors, min_samples=3, k=3):
+    """track_id -> 0 | 1 | None(other=GK/referee).
 
-    Uses only Lab's a*/b* channels: luminance mostly encodes lighting/shadow, which would
-    otherwise dominate the distance and split players by how sunlit they are rather than by kit.
+    Clusters PER-TRACK mean torso colour in CHROMA space (Lab a*/b* only — luminance mostly
+    encodes lighting/shadow and would split players by how sunlit they are, not by kit).
+
+    Uses **k=3, then takes the two largest clusters as the teams**. k=2 is the wrong model
+    for football: a referee's kit is often *further* from both teams than the teams are from
+    each other, so 2-means correctly-but-uselessly splits {both teams} vs {referee}. Three
+    groups (team, team, officials) matches reality; anything outside the two biggest is drawn
+    as "other".
     """
     means = {t: np.mean(v, axis=0) for t, v in track_colors.items() if len(v) >= min_samples}
     if len(means) < 6:
         return {}
     tids = list(means)
     X = np.stack([means[t] for t in tids])[:, 1:].astype(np.float32)   # a*, b* only
-    lab, C = _best_split(X)
-    sep = float(np.linalg.norm(C[0] - C[1])) or 1.0
-    dist = np.linalg.norm(X - C[lab], axis=1)
-    return {t: (None if dist[i] > 0.6 * sep else int(lab[i])) for i, t in enumerate(tids)}
+    k = min(k, len(X))
+    lab, C = _best_kmeans(X, k)
+    sizes = [(lab == c).sum() for c in range(k)]
+    teams = list(np.argsort(sizes)[::-1][:2])          # two largest clusters = the two squads
+    remap = {int(c): (0 if c == teams[0] else 1) for c in teams}
+    return {t: remap.get(int(lab[i])) for i, t in enumerate(tids)}
 
 
 def draw_header(img, title, sub):
