@@ -15,6 +15,7 @@ ranked summary is written to outputs/rung3_sweep/<set>/summary.json.
 """
 import argparse
 import copy
+import hashlib
 import json
 import subprocess
 import sys
@@ -69,7 +70,7 @@ def resolve_tracker(cfg, dst_dir):
     return str(out)
 
 
-def run_config(cfg, args, out_root, expected_n):
+def run_config(cfg, args, out_root, expected_n, seq_key):
     name = cfg["name"]
     out_dir = out_root / name
     metrics_json = out_dir / "baseline_metrics.json"
@@ -78,25 +79,19 @@ def run_config(cfg, args, out_root, expected_n):
     imgsz = cfg.get("imgsz", 1280)
     conf = cfg.get("conf", 0.25)
 
-    if metrics_json.exists() and not args.force:
-        c = json.loads(metrics_json.read_text())
-        prov = c.get("provenance", {})
-        pa = prov.get("args", {})
-        # Reuse ONLY on an exact IDENTITY match. A path is not an identity: a checkpoint or a
-        # tracker config can change bytes at the same path, and a full run's clip count can
-        # change — both silently reuse the wrong experiment. Compare CONTENT HASHES, and
-        # validate the sequence count on every run (not just subset runs).
-        same = (c.get("split") == args.split
-                and str(pa.get("splits_file")) == str(args.splits_file)
-                and c.get("n_seqs") == expected_n
-                and c.get("subset") == bool(args.max_seqs)
-                and int(pa.get("imgsz", -1)) == int(imgsz)
-                and float(pa.get("conf", -1.0)) == float(conf)
-                and prov.get("detector", {}).get("sha256") == sha256_file(weights)
-                and prov.get("tracker", {}).get("sha256") == sha256_file(tracker))
-        if same:
-            print(f">>> [{name}] cached (identity: weights+tracker hashes, {expected_n} seqs) — reuse", flush=True)
-            return c
+    # Cache identity = everything that can change the number, hashed. A path is not an
+    # identity: a checkpoint or tracker file can change bytes at the same path, and a split
+    # file can list 18 *different* sequences under the same name and count. So the key
+    # includes a hash of the exact selected sequence list.
+    key = {"split": args.split, "splits_file": str(args.splits_file), "seq_key": seq_key,
+           "n_seqs": expected_n, "subset": bool(args.max_seqs), "imgsz": int(imgsz),
+           "conf": float(conf), "weights_sha256": sha256_file(weights),
+           "tracker_sha256": sha256_file(tracker)}
+    key_json = out_dir / "sweep_key.json"
+    if metrics_json.exists() and key_json.exists() and not args.force:
+        if json.loads(key_json.read_text()) == key:
+            print(f">>> [{name}] cached (identity match incl. sequence-list hash) — reuse", flush=True)
+            return json.loads(metrics_json.read_text())
 
     cmd = [
         sys.executable, str(PROJ / "scripts" / "06_gsr_baseline_eval.py"),
@@ -112,6 +107,7 @@ def run_config(cfg, args, out_root, expected_n):
     except subprocess.CalledProcessError as e:
         print(f"!!! [{name}] FAILED (exit {e.returncode}) — skipping this config", flush=True)
         return None
+    key_json.write_text(json.dumps(key))   # only after a genuine run
     return json.loads(metrics_json.read_text())
 
 
@@ -138,11 +134,16 @@ def main():
 
     # how many sequences THIS run will actually score — part of the cache identity
     _all_seqs = json.loads(Path(args.splits_file).read_text())[args.split]
-    expected_n = len(_all_seqs[: args.max_seqs] if args.max_seqs else _all_seqs)
+    _sel = _all_seqs[: args.max_seqs] if args.max_seqs else _all_seqs
+    expected_n = len(_sel)
+    _h = hashlib.sha256()
+    for _s in _sel:
+        _h.update(f"{_s.get('name')}\t{_s.get('path')}\n".encode())
+    seq_key = _h.hexdigest()   # identifies WHICH sequences, not just how many
 
     rows = []
     for cfg in configs:
-        res = run_config(cfg, args, out_root, expected_n)
+        res = run_config(cfg, args, out_root, expected_n, seq_key)
         if res is None:
             continue  # config failed (e.g. weight download) — already logged; keep going
         m = res["metrics"]
