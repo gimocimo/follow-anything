@@ -87,6 +87,25 @@ def test_rejects_tampered_inventory(tmp_path):
     assert not rep["ok"] and not rep["fingerprint_match"], rep
 
 
+def test_rejects_nested_injected_frame(tmp_path):
+    """A nested file bypasses a non-recursive scan — and one whose STEM collides with a
+    manifested file bypasses stem-based keying. The loader reads it regardless."""
+    _make_export(tmp_path)
+    nested = tmp_path / "images" / "train" / "sub"
+    nested.mkdir(parents=True)
+    (nested / "SNGS-100_000005.jpg").write_bytes(b"EVAL-GAME-FRAME")  # colliding stem, different path
+    rep = verify_export(tmp_path)
+    assert not rep["ok"] and any("sub/" in e for e in rep["extra"]), rep
+
+
+def test_rejects_exotic_image_format(tmp_path):
+    """ultralytics reads .bmp/.webp/.tif too — a narrower extension list here is a bypass."""
+    _make_export(tmp_path)
+    (tmp_path / "images" / "train" / "sneaky.bmp").write_bytes(b"EVAL-GAME-FRAME")
+    rep = verify_export(tmp_path)
+    assert not rep["ok"] and any("sneaky.bmp" in e for e in rep["extra"]), rep
+
+
 def test_unmanifested_dataset_is_not_ok(tmp_path):
     """No manifest at all => cannot be called provably leak-free."""
     (tmp_path / "images" / "train").mkdir(parents=True)

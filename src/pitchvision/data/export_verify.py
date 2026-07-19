@@ -8,7 +8,17 @@ silently trained on while the manifest still describes the clean export — the 
 then unprovable, which is exactly what the leave-one-game-out invariant (PROJECT_PLAN §3) forbids.
 
 `verify_export` detects all three drift modes: **missing**, **modified**, and — the dangerous
-one — **extra** files that the manifest never authorised.
+one — **extra** files the manifest never authorised.
+
+Two subtleties learned from adversarial review, both of which previously allowed a bypass:
+  * the scan is **recursive** and keyed on **relative paths**, not filename stems. A nested
+    `images/train/sub/x.jpg` (or one whose stem collides with a manifested file) is caught.
+  * the image-extension set is taken from **ultralytics itself**, so a `.bmp`/`.webp`/`.tif`
+    the loader would happily read cannot slip past a narrower list here.
+
+NOTE: passing this check is necessary but not sufficient — it verifies a *directory*. The
+loader must additionally be pinned to that directory (see `scripts/10`'s data.yaml check and
+its `on_train_start` guard, which compares ultralytics' own resolved file list).
 """
 from __future__ import annotations
 
@@ -16,7 +26,12 @@ import hashlib
 import json
 from pathlib import Path
 
-IMG_EXTS = (".jpg", ".jpeg", ".png")
+try:  # match the loader's own notion of "an image" rather than guessing
+    from ultralytics.data.utils import IMG_FORMATS as _FMTS
+    IMG_EXTS = tuple(f".{e.lower().lstrip('.')}" for e in _FMTS)
+except Exception:  # ultralytics not importable (e.g. metric-only CI)
+    IMG_EXTS = (".bmp", ".dng", ".jpeg", ".jpg", ".mpo", ".png", ".tif",
+                ".tiff", ".webp", ".pfm", ".heic")
 
 
 def sha256_file(path) -> str:
@@ -36,12 +51,19 @@ def inventory_fingerprint(entries) -> str:
     return fp.hexdigest()
 
 
+def expected_relpaths(inv):
+    """The exact relative paths this export authorises."""
+    imgs = {f"images/{e['subset']}/{e['stem']}.jpg" for e in inv}
+    lbls = {f"labels/{e['subset']}/{e['stem']}.txt" for e in inv}
+    return imgs, lbls
+
+
 def verify_export(dataset_dir) -> dict:
     """Re-hash the on-disk dataset and compare it against export_inventory/export_manifest.
 
-    Returns a report: {ok, missing, modified, extra, fingerprint_match, n_expected,
-    export_sha256, games}. `ok` is True only when the dataset on disk is byte-identical to
-    the manifested export — nothing missing, nothing altered, nothing extra.
+    Returns {ok, missing, modified, extra, fingerprint_match, n_expected, export_sha256, games}.
+    `ok` is True only when the dataset on disk is byte-identical to the manifested export —
+    nothing missing, nothing altered, nothing extra anywhere in the tree.
     """
     d = Path(dataset_dir)
     man_p, inv_p = d / "export_manifest.json", d / "export_inventory.json"
@@ -52,11 +74,11 @@ def verify_export(dataset_dir) -> dict:
 
     man = json.loads(man_p.read_text())
     inv = json.loads(inv_p.read_text())
+    exp_imgs, exp_lbls = expected_relpaths(inv)
 
-    missing, modified, expected = [], [], set()
+    missing, modified = [], []
     for e in inv:
         key = f"{e['subset']}/{e['stem']}"
-        expected.add(key)
         img = d / "images" / e["subset"] / f"{e['stem']}.jpg"
         lbl = d / "labels" / e["subset"] / f"{e['stem']}.txt"
         if not img.exists() or not lbl.exists():
@@ -67,15 +89,19 @@ def verify_export(dataset_dir) -> dict:
         if hashlib.sha256(lbl.read_bytes()).hexdigest() != e.get("label_sha256"):
             modified.append(f"{key} (label)")
 
-    # EXTRA: anything ultralytics would load that the manifest never authorised.
+    # EXTRA: walk the whole tree recursively; anything the loader could read that the
+    # manifest does not authorise (by exact relative path) is drift.
     extra = []
-    for sub in ("train", "val"):
-        for p in sorted((d / "images" / sub).glob("*")):
-            if p.suffix.lower() in IMG_EXTS and f"{sub}/{p.stem}" not in expected:
-                extra.append(f"images/{sub}/{p.name}")
-        for p in sorted((d / "labels" / sub).glob("*.txt")):
-            if f"{sub}/{p.stem}" not in expected:
-                extra.append(f"labels/{sub}/{p.name}")
+    for p in sorted((d / "images").rglob("*")):
+        if p.is_file() and p.suffix.lower() in IMG_EXTS:
+            rel = p.relative_to(d).as_posix()
+            if rel not in exp_imgs:
+                extra.append(rel)
+    for p in sorted((d / "labels").rglob("*")):
+        if p.is_file() and p.suffix.lower() == ".txt":
+            rel = p.relative_to(d).as_posix()
+            if rel not in exp_lbls:
+                extra.append(rel)
 
     fp_match = inventory_fingerprint(inv) == man.get("export_sha256")
     return {"ok": not missing and not modified and not extra and fp_match,
