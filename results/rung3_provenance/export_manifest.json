@@ -1,32 +1,62 @@
 {
-  "source_split": "train",
+  "source_splits": [
+    "train",
+    "valid"
+  ],
+  "game_source_split": {
+    "6": "train",
+    "9": "train",
+    "3": "valid",
+    "5": "valid"
+  },
+  "classes": {
+    "0": "player",
+    "1": "goalkeeper",
+    "2": "referee",
+    "3": "ball"
+  },
   "requested_games": [
+    "3",
+    "5",
     "6",
     "9"
   ],
   "observed_games": [
+    "3",
+    "5",
     "6",
     "9"
   ],
   "per_game_frames": {
-    "6": 2850,
-    "9": 3000
+    "3": 1575,
+    "5": 14250,
+    "6": 14250,
+    "9": 15000
   },
-  "n_clips": 39,
-  "stride": 5,
-  "val_every": 10,
+  "n_clips": 79,
+  "stride": 1,
+  "val_games": [
+    "3"
+  ],
+  "val_stride": 10,
+  "val_every": null,
+  "val_protocol": "cross-match (val games held out entirely)",
   "counts": {
     "train": {
-      "img": 5250,
-      "person": 79677,
-      "ball": 5090
+      "img": 43500,
+      "player": 595245,
+      "goalkeeper": 25545,
+      "referee": 62502,
+      "ball": 41732
     },
     "val": {
-      "img": 600,
-      "person": 10394,
-      "ball": 575
+      "img": 1575,
+      "player": 24333,
+      "goalkeeper": 867,
+      "referee": 2505,
+      "ball": 1535
     }
   },
-  "export_sha256": "f313f3a745730572c896ea353f3820851df0c4047bea9579fdb14642d72005b2",
+  "export_sha256": "98cfbc8f948354d46d6a87f1d3d18e87e3f12ed0e6283604558387b66448e745",
   "note": "leave-one-game-out export. observed_games == requested_games and MUST exclude the eval game(s). export_sha256 fingerprints the exact (frame, game, label) set trained on."
 }

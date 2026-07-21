@@ -1,37 +1,69 @@
 {
-  "base_weights": "yolo11m.pt",
-  "base_sha256": "d5ffc1a674953a08e11a8d21e022781b1b23a19b730afc309290bd9fb5305b95",
-  "data_yaml": "data/yolo_gsr_dev/data.yaml",
+  "base_weights": "yolo11l.pt",
+  "base_sha256": "9ebd0e09d59811db4b1d61e2bc6730649608b1ac47f8dd01e2da6bca7c20023f",
+  "data_yaml": "data/yolo_gsr_big/data.yaml",
+  "data_yaml_sha256": "b51bdca638549e85633a4570145276174b375df07c0efc244541a5127a0591a6",
+  "data_yaml_problems": [],
   "dataset_export": {
-    "source_split": "train",
+    "source_splits": [
+      "train",
+      "valid"
+    ],
+    "game_source_split": {
+      "6": "train",
+      "9": "train",
+      "3": "valid",
+      "5": "valid"
+    },
+    "classes": {
+      "0": "player",
+      "1": "goalkeeper",
+      "2": "referee",
+      "3": "ball"
+    },
     "requested_games": [
+      "3",
+      "5",
       "6",
       "9"
     ],
     "observed_games": [
+      "3",
+      "5",
       "6",
       "9"
     ],
     "per_game_frames": {
-      "6": 2850,
-      "9": 3000
+      "3": 1575,
+      "5": 14250,
+      "6": 14250,
+      "9": 15000
     },
-    "n_clips": 39,
-    "stride": 5,
-    "val_every": 10,
+    "n_clips": 79,
+    "stride": 1,
+    "val_games": [
+      "3"
+    ],
+    "val_stride": 10,
+    "val_every": null,
+    "val_protocol": "cross-match (val games held out entirely)",
     "counts": {
       "train": {
-        "img": 5250,
-        "person": 79677,
-        "ball": 5090
+        "img": 43500,
+        "player": 595245,
+        "goalkeeper": 25545,
+        "referee": 62502,
+        "ball": 41732
       },
       "val": {
-        "img": 600,
-        "person": 10394,
-        "ball": 575
+        "img": 1575,
+        "player": 24333,
+        "goalkeeper": 867,
+        "referee": 2505,
+        "ball": 1535
       }
     },
-    "export_sha256": "f313f3a745730572c896ea353f3820851df0c4047bea9579fdb14642d72005b2",
+    "export_sha256": "98cfbc8f948354d46d6a87f1d3d18e87e3f12ed0e6283604558387b66448e745",
     "note": "leave-one-game-out export. observed_games == requested_games and MUST exclude the eval game(s). export_sha256 fingerprints the exact (frame, game, label) set trained on."
   },
   "dataset_verified_pre": {
@@ -40,9 +72,11 @@
     "modified": [],
     "extra": [],
     "fingerprint_match": true,
-    "n_expected": 5850,
-    "export_sha256": "f313f3a745730572c896ea353f3820851df0c4047bea9579fdb14642d72005b2",
+    "n_expected": 45075,
+    "export_sha256": "98cfbc8f948354d46d6a87f1d3d18e87e3f12ed0e6283604558387b66448e745",
     "games": [
+      "3",
+      "5",
       "6",
       "9"
     ]
@@ -53,20 +87,26 @@
     "modified": [],
     "extra": [],
     "fingerprint_match": true,
-    "n_expected": 5850,
-    "export_sha256": "f313f3a745730572c896ea353f3820851df0c4047bea9579fdb14642d72005b2",
+    "n_expected": 45075,
+    "export_sha256": "98cfbc8f948354d46d6a87f1d3d18e87e3f12ed0e6283604558387b66448e745",
     "games": [
+      "3",
+      "5",
       "6",
       "9"
     ]
   },
+  "loader_guard": {
+    "ok": true,
+    "n_files": 45075
+  },
   "provably_leave_one_game_out": true,
-  "output_best_sha256": "3c45e3d4e78c366c1954e8f6eae98dba4d19514088924cefbc8fc17f6a867cd4",
+  "output_best_sha256": "d3ad0aa79ea043063a02974a2d6a92e918a02fc84f6fcdef6a054952330166b2",
   "requested": {
-    "epochs": 60,
-    "imgsz": 1280,
-    "batch": "4",
-    "workers": 2,
+    "epochs": 30,
+    "imgsz": 1536,
+    "batch": "-1",
+    "workers": 8,
     "amp": "true",
     "device": "0",
     "resume": null,
@@ -75,20 +115,20 @@
   "resolved_args": {
     "task": "detect",
     "mode": "train",
-    "model": "yolo11m.pt",
-    "data": "data/yolo_gsr_dev/data.yaml",
-    "epochs": 60,
+    "model": "yolo11l.pt",
+    "data": "data/yolo_gsr_big/data.yaml",
+    "epochs": 30,
     "time": null,
-    "patience": 20,
+    "patience": 10,
     "batch": 4,
-    "imgsz": 1280,
+    "imgsz": 1536,
     "save": true,
     "save_period": -1,
     "cache": false,
     "device": "0",
-    "workers": 2,
+    "workers": 8,
     "project": "/follow-anything/runs/gsr_ft",
-    "name": "m_1280",
+    "name": "l_1536_big",
     "exist_ok": false,
     "pretrained": true,
     "cls_remap": true,
@@ -184,16 +224,16 @@
     "erasing": 0.4,
     "cfg": null,
     "tracker": "tracktrack.yaml",
-    "save_dir": "/follow-anything/runs/gsr_ft/m_1280"
+    "save_dir": "/follow-anything/runs/gsr_ft/l_1536_big"
   },
   "versions": {
-    "ultralytics": "8.4.100",
+    "ultralytics": "8.4.102",
     "torch": "2.8.0+cu128",
     "torchvision": "0.23.0+cu128",
     "numpy": "2.1.2",
     "lap": "0.5.13"
   },
-  "git_sha": "55287fc107e70a4f5d875d19cf6c5944925d52d1",
+  "git_sha": "8994aa1835df3f16495849ed0539d192f9c7a6c0",
   "python": "3.12.3",
-  "platform": "Linux-6.8.0-87-generic-x86_64-with-glibc2.39"
+  "platform": "Linux-6.8.0-40-generic-x86_64-with-glibc2.39"
 }

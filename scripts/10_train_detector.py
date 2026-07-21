@@ -121,6 +121,23 @@ def make_loader_guard(dataset_dir, state):
     return guard
 
 
+def make_stopfile_guard(stop_path, state):
+    """Graceful early exit that PRESERVES the proof. If `stop_path` appears mid-run, finish the
+    current epoch, run final validation, save best.pt, and let postflight write the manifest — so
+    a run stopped to cap GPU spend is STILL provably leave-one-game-out. Registered on
+    'on_fit_epoch_end', which fires AFTER ultralytics' own early-stopper sets trainer.stop, so this
+    can only ADD a stop, never clear one. Single-GPU only (same constraint as the loader guard)."""
+    sp = Path(stop_path)
+
+    def guard(trainer):
+        if sp.exists():
+            print(f"[stop-file] {sp} present -> stopping after this epoch; best.pt, final "
+                  "validation and train_manifest.json will still be written.", flush=True)
+            trainer.stop = True
+            state["stopfile_triggered"] = True
+    return guard
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", help="path to the data.yaml from scripts/09 (omit when --resume)")
@@ -132,6 +149,9 @@ def main():
     ap.add_argument("--project", default="runs/gsr_ft")
     ap.add_argument("--name", default=None)
     ap.add_argument("--patience", type=int, default=20)
+    ap.add_argument("--stop-file", default="STOP",
+                    help="graceful-stop sentinel: `touch STOP` and the run ends after the current "
+                         "epoch WITH best.pt + a valid train_manifest (proof preserved). Caps GPU spend safely.")
     ap.add_argument("--workers", type=int, default=8,
                     help="dataloader workers; use 0 if training HANGS at 'Starting training'")
     ap.add_argument("--amp", default="true", choices=["true", "false"])
@@ -140,6 +160,10 @@ def main():
                     help="train even if verification fails (the checkpoint will NOT be provably "
                          "leave-one-game-out; recorded as such in the manifest)")
     args = ap.parse_args()
+
+    if Path(args.stop_file).exists():
+        sys.exit(f"ABORTING: stop-file '{args.stop_file}' already exists and would halt training at "
+                 f"epoch 1. Remove it first:  rm {args.stop_file}")
 
     from ultralytics import YOLO
 
@@ -175,10 +199,11 @@ def main():
     else:
         print("[preflight] WARNING: no data.yaml resolved — dataset provenance NOT captured.", flush=True)
 
-    state = {"loader_guard": None}
+    state = {"loader_guard": None, "stopfile_triggered": False}
     model = YOLO(args.resume) if args.resume else YOLO(args.weights)
     if dataset_dir and not args.skip_verify:
         model.add_callback("on_train_start", make_loader_guard(dataset_dir, state))
+    model.add_callback("on_fit_epoch_end", make_stopfile_guard(args.stop_file, state))
 
     if args.resume:
         model.train(resume=True)
@@ -219,6 +244,7 @@ def main():
         "dataset_export": export_info,
         "dataset_verified_pre": pre, "dataset_verified_post": post,
         "loader_guard": guard,
+        "stopped_via_stopfile": state.get("stopfile_triggered", False),
         "provably_leave_one_game_out": provable,
         "output_best_sha256": sha256_file(best) if best.exists() else None,
         "requested": {"epochs": args.epochs, "imgsz": args.imgsz, "batch": args.batch,

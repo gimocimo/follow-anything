@@ -12,7 +12,8 @@ data/*
 !data/.gitkeep
 outputs/*
 !outputs/.gitkeep
-runs/           # ultralytics training/val runs (weights, plots, csv)
+# ultralytics training/val runs (weights, plots, csv)
+runs/
 
 # Model weights & exports
 *.pt
@@ -24,6 +25,10 @@ runs/           # ultralytics training/val runs (weights, plots, csv)
 *.mp4
 *.avi
 *.mkv
+
+# Transfer / archive artifacts
+*.tgz
+*.tar.gz
 
 # OS / editors
 .DS_Store

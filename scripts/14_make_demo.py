@@ -56,7 +56,7 @@ def main():
     ap.add_argument("--clip-index", type=int, default=0)
     ap.add_argument("--weights", default="models/yolo11m_gsr_ft.pt")
     ap.add_argument("--tracker", default="configs/trackers/botsort_newtrk040.yaml")
-    ap.add_argument("--classes", default="0,1")
+    ap.add_argument("--classes", default=None, help="comma list of class ids; default = every class the model has")
     ap.add_argument("--imgsz", type=int, default=1280)
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--device", default="auto")
@@ -79,8 +79,10 @@ def main():
     # ---- pass 1: track once, cache detections + per-track torso colours ----
     from ultralytics import YOLO
     model = YOLO(args.weights)
+    class_ids = ([int(c) for c in args.classes.split(",")] if args.classes
+                 else sorted(int(k) for k in model.names))
     results = model.track(
-        source=str(img_dir), classes=[int(c) for c in args.classes.split(",")],
+        source=str(img_dir), classes=class_ids,
         conf=args.conf, imgsz=args.imgsz, tracker=_resolve_tracker(args.tracker),
         persist=True, stream=True, device=get_device(args.device), verbose=False,
     )
