@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 try:  # match the loader's own notion of "an image" rather than guessing
@@ -56,6 +57,64 @@ def expected_relpaths(inv):
     imgs = {f"images/{e['subset']}/{e['stem']}.jpg" for e in inv}
     lbls = {f"labels/{e['subset']}/{e['stem']}.txt" for e in inv}
     return imgs, lbls
+
+
+def _relpaths(root_str, files):
+    """Lexical (symlink-agnostic) posix relpaths of `files` under `root_str`. Lexical is the
+    whole point: an in-root alias directory resolves to ITSELF here, not to its symlink target,
+    so aliasing manifested images under a different directory name stays visible."""
+    return {Path(os.path.relpath(str(f), root_str)).as_posix() for f in files}
+
+
+def authenticate_loader(dataset_dir, inv, train_files, val_files) -> dict:
+    """Authoritative loader check — SPLIT-AWARE and LABEL-AWARE.
+
+    Adversarial review (2026-07) broke the weaker guards: verifying the *directory* or the
+    *union* of resolved image paths cannot stop a data.yaml that (a) pulls the held-out VAL
+    images into the TRAIN loader (union unchanged), or (b) aliases manifested images under a new
+    directory carrying attacker-controlled LABELS (resolved image paths still match). This
+    verifies each loader independently against its inventory subset AND authenticates the labels
+    each loader will actually consume:
+
+      * train images == manifest train subset EXACTLY (no val leakage), val == val subset, no overlap;
+      * paths compared LEXICALLY (no symlink resolution) so an alias directory is caught by name;
+      * for every consumed image the label ultralytics derives (images/->labels/, *.*->*.txt) is
+        hashed on disk and must match the inventory, so swapped/aliased/tampered labels cannot pass.
+
+    Returns a report dict; `ok` only when every split and every consumed label matches.
+    """
+    root = str(Path(dataset_dir).resolve())
+    exp = {"train": set(), "val": set()}
+    lbl_sha = {}
+    for e in inv:
+        sub = e["subset"]
+        exp[sub].add(f"images/{sub}/{e['stem']}.jpg")
+        lbl_sha[f"labels/{sub}/{e['stem']}.txt"] = e.get("label_sha256")
+
+    tr, va = _relpaths(root, train_files), _relpaths(root, val_files)
+    problems = []
+    if tr != exp["train"]:
+        problems.append(f"train loader != manifest train set "
+                        f"(+{sorted(tr - exp['train'])[:3]} -{sorted(exp['train'] - tr)[:3]})")
+    if va != exp["val"]:
+        problems.append(f"val loader != manifest val set "
+                        f"(+{sorted(va - exp['val'])[:3]} -{sorted(exp['val'] - va)[:3]})")
+    if tr & va:
+        problems.append(f"train/val overlap: {sorted(tr & va)[:3]}")
+
+    bad = []
+    for rel in sorted(tr | va):
+        lbl_rel = rel.replace("images", "labels", 1).rsplit(".", 1)[0] + ".txt"
+        p = Path(dataset_dir) / lbl_rel
+        want = lbl_sha.get(lbl_rel)
+        if want is None or not p.exists() or sha256_file(p) != want:
+            bad.append(lbl_rel)
+    if bad:
+        problems.append(f"consumed labels not authenticated ({len(bad)}): {bad[:3]}")
+
+    return {"ok": not problems, "n_train": len(tr), "n_val": len(va), "n_files": len(tr | va),
+            "train_matches_manifest": tr == exp["train"], "val_matches_manifest": va == exp["val"],
+            "labels_authenticated": not bad, "problems": problems}
 
 
 def verify_export(dataset_dir) -> dict:

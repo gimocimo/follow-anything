@@ -24,6 +24,7 @@ result, and the output `best.pt` SHA — one unbroken chain from dataset bytes t
 """
 import argparse
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -32,7 +33,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from pitchvision.data.export_verify import format_report, sha256_file, verify_export
+from pitchvision.data.export_verify import authenticate_loader, format_report, sha256_file, verify_export
 
 
 def _versions(names):
@@ -68,7 +69,11 @@ def _data_from_resume(ckpt):
 
 
 def check_data_yaml(data_yaml, dataset_dir):
-    """The loader reads data.yaml, not the directory — so pin it to the manifested directory."""
+    """Authenticate data.yaml: root == manifested dir, AND train/val must be EXACTLY the canonical
+    single dirs images/train, images/val (what scripts/09 writes). The old 'anywhere under the
+    root' rule let a list like [images/train, images/val] pull the held-out val into training, or
+    an in-root alias dir smuggle attacker labels. Compared lexically (normpath, no symlink follow)
+    so an aliased dir is caught by name; the loader guard then re-checks what was actually read."""
     problems = []
     try:
         cfg = yaml.safe_load(Path(data_yaml).read_text()) or {}
@@ -80,44 +85,36 @@ def check_data_yaml(data_yaml, dataset_dir):
         problems.append(f"data.yaml path={root} != manifested dataset dir {dd}")
     for split in ("train", "val"):
         raw = cfg.get(split)
+        want = os.path.normpath(str(dd / "images" / split))
         if not raw:
             problems.append(f"data.yaml has no '{split}' entry")
-            continue
-        for item in ([raw] if isinstance(raw, str) else list(raw)):
-            p = (root / item).resolve()
-            if not (p == dd or dd in p.parents):
-                problems.append(f"data.yaml {split}={p} escapes the manifested dir {dd}")
+        elif not isinstance(raw, str):
+            problems.append(f"data.yaml '{split}' must be the single dir images/{split}, "
+                            f"got {type(raw).__name__} {raw!r}")
+        elif os.path.normpath(str(root / raw)) != want:
+            problems.append(f"data.yaml {split}={os.path.normpath(str(root / raw))} != canonical {want}")
     return problems
 
 
 def make_loader_guard(dataset_dir, state):
-    """on_train_start: compare ultralytics' RESOLVED file list against the inventory.
-
-    The authoritative check — it inspects what the loader actually enumerated, so it cannot
-    be fooled by a redirected data.yaml, a nested subdirectory, or an unexpected image format.
-    """
+    """on_train_start: SPLIT-AWARE + LABEL-AWARE authentication of what ultralytics ACTUALLY
+    enumerated (export_verify.authenticate_loader). Verifies the train loader read exactly the
+    manifest's train images and the val loader exactly the val images (no val-into-train leakage),
+    and hashes the labels each loader will consume — closing the union-of-resolved-paths and
+    aliased-label bypasses that a directory or image-union check cannot detect."""
     inv = json.loads((Path(dataset_dir) / "export_inventory.json").read_text())
-    expected = {str((Path(dataset_dir) / "images" / e["subset"] / f"{e['stem']}.jpg").resolve())
-                for e in inv}
 
     def guard(trainer):
-        actual = set()
-        for name in ("train_loader", "test_loader"):
+        def im_files(name):
             ds = getattr(getattr(trainer, name, None), "dataset", None)
-            for f in (getattr(ds, "im_files", None) or []):
-                actual.add(str(Path(f).resolve()))
-        if actual != expected:
-            extra = sorted(actual - expected)[:5]
-            missing = sorted(expected - actual)[:5]
-            state["loader_guard"] = {"ok": False, "n_actual": len(actual), "n_expected": len(expected),
-                                     "extra": extra, "missing": missing}
-            raise RuntimeError(
-                f"LOADER MISMATCH — refusing to train on unverified data. ultralytics resolved "
-                f"{len(actual)} files; the manifest authorises {len(expected)}. "
-                f"extra={extra} missing={missing}")
-        state["loader_guard"] = {"ok": True, "n_files": len(actual)}
-        print(f"[loader-guard] ultralytics resolved exactly the {len(actual)} manifested files ✅",
-              flush=True)
+            return list(getattr(ds, "im_files", None) or [])
+        rep = authenticate_loader(dataset_dir, inv, im_files("train_loader"), im_files("test_loader"))
+        state["loader_guard"] = rep
+        if not rep["ok"]:
+            raise RuntimeError("LOADER MISMATCH — refusing to train on unverified data. "
+                               + " | ".join(rep["problems"]))
+        print(f"[loader-guard] train {rep['n_train']} + val {rep['n_val']} = {rep['n_files']} files "
+              f"match the manifest, consumed labels authenticated ✅", flush=True)
     return guard
 
 
