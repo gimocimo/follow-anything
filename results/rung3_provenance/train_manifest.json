@@ -98,10 +98,17 @@
   },
   "loader_guard": {
     "ok": true,
-    "n_files": 45075
+    "n_train": 43500,
+    "n_val": 1575,
+    "n_files": 45075,
+    "train_matches_manifest": true,
+    "val_matches_manifest": true,
+    "labels_authenticated": true,
+    "problems": []
   },
+  "stopped_via_stopfile": false,
   "provably_leave_one_game_out": true,
-  "output_best_sha256": "d3ad0aa79ea043063a02974a2d6a92e918a02fc84f6fcdef6a054952330166b2",
+  "output_best_sha256": "57d95785a996755a069a2932a42933738a925a95e3b2424e6727e30514339565",
   "requested": {
     "epochs": 30,
     "imgsz": 1536,
@@ -128,7 +135,7 @@
     "device": "0",
     "workers": 8,
     "project": "/follow-anything/runs/gsr_ft",
-    "name": "l_1536_big",
+    "name": "l_1536_v2",
     "exist_ok": false,
     "pretrained": true,
     "cls_remap": true,
@@ -224,16 +231,16 @@
     "erasing": 0.4,
     "cfg": null,
     "tracker": "tracktrack.yaml",
-    "save_dir": "/follow-anything/runs/gsr_ft/l_1536_big"
+    "save_dir": "/follow-anything/runs/gsr_ft/l_1536_v2"
   },
   "versions": {
-    "ultralytics": "8.4.102",
+    "ultralytics": "8.4.103",
     "torch": "2.8.0+cu128",
     "torchvision": "0.23.0+cu128",
     "numpy": "2.1.2",
     "lap": "0.5.13"
   },
-  "git_sha": "8994aa1835df3f16495849ed0539d192f9c7a6c0",
+  "git_sha": "5135b229b47d2d02ec285c0726bb66c71ee60801",
   "python": "3.12.3",
-  "platform": "Linux-6.8.0-40-generic-x86_64-with-glibc2.39"
+  "platform": "Linux-6.14.0-24-generic-x86_64-with-glibc2.39"
 }

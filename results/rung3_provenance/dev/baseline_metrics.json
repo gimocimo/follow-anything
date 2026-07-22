@@ -1,0 +1,78 @@
+{
+  "split": "test",
+  "role": "development",
+  "n_seqs": 18,
+  "subset": false,
+  "metrics": {
+    "HOTA": 0.6340380128805139,
+    "DetA": 0.7310232767262094,
+    "AssA": 0.550683166959357,
+    "MOTA": 0.8974460915911542,
+    "IDF1": 0.731361785018594,
+    "IDSW": 921
+  },
+  "provenance": {
+    "git_sha": "5135b229b47d2d02ec285c0726bb66c71ee60801",
+    "python": "3.12.3",
+    "platform": "Linux-6.14.0-24-generic-x86_64-with-glibc2.39",
+    "device": "cuda",
+    "packages": {
+      "torch": "2.8.0+cu128",
+      "torchvision": "0.23.0+cu128",
+      "ultralytics": "8.4.103",
+      "numpy": "2.1.2",
+      "opencv-python": "5.0.0.93",
+      "scipy": "1.18.0",
+      "trackeval": "1.0.dev1",
+      "lap": "0.5.13"
+    },
+    "detector": {
+      "weights": "runs/gsr_ft/l_1536_v2/weights/best.pt",
+      "sha256": "57d95785a996755a069a2932a42933738a925a95e3b2424e6727e30514339565",
+      "imgsz": 1536,
+      "conf": 0.25,
+      "classes": "0,1,2,3"
+    },
+    "tracker": {
+      "requested": "configs/trackers/botsort_newtrk040.yaml",
+      "resolved": "configs/trackers/botsort_newtrk040.yaml",
+      "sha256": "badb024982cea5cff3b2b8d670d5e7e6f922164fc2bc4bce4f8d53274d26d92a"
+    },
+    "category_policy": "all object categories (player/GK/referee/ball + other); see src/pitchvision/data/gsr.py",
+    "gt_category_counts": {
+      "player": 212984,
+      "goalkeeper": 6881,
+      "referee": 20395,
+      "ball": 12599,
+      "other": 1183
+    },
+    "split": {
+      "file": "outputs/gsr_splits.json",
+      "name": "test",
+      "meta": {
+        "data_dir": "data/soccernet-gsr",
+        "source_split": "train",
+        "policy": "leave-one-game-out",
+        "game_assignment": {
+          "4": "test",
+          "6": "val",
+          "9": "train"
+        },
+        "role": "development",
+        "grouping": "info.game_id (required)"
+      }
+    },
+    "args": {
+      "splits_file": "outputs/gsr_splits.json",
+      "split": "test",
+      "weights": "runs/gsr_ft/l_1536_v2/weights/best.pt",
+      "imgsz": 1536,
+      "conf": 0.25,
+      "classes": "0,1,2,3",
+      "tracker": "configs/trackers/botsort_newtrk040.yaml",
+      "device": "auto",
+      "max_seqs": null,
+      "out_dir": "outputs/gsr_ft_dev"
+    }
+  }
+}

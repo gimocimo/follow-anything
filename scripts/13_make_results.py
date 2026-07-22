@@ -157,8 +157,10 @@ def build(dev, fin, pc, oc, em, tm, dev_gate, fin_gate):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dev-dir", default="outputs/gsr_ft_dev")
-    ap.add_argument("--final-dir", default="outputs/gsr_ft_final")
+    # Defaults point at COMMITTED evidence, not the gitignored outputs/ copies: a clean clone must
+    # be able to regenerate this file byte-for-byte (adversarial review, 2026-07).
+    ap.add_argument("--dev-dir", default="results/rung3_provenance/dev")
+    ap.add_argument("--final-dir", default="results/rung3_provenance/final")
     ap.add_argument("--prov-dir", default="results/rung3_provenance")
     ap.add_argument("--rung1", default="results/rung1_baseline.json")
     ap.add_argument("--out", default="results/rung3_baseline.json")

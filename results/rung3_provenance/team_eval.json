@@ -1,0 +1,96 @@
+{
+  "overall_accuracy": 0.8551443556966533,
+  "n_tracks": 0,
+  "per_clip": [
+    {
+      "clip": "SNGS-060",
+      "k2": {
+        "accuracy": 0.7594723029184424,
+        "n": 22,
+        "unassigned": 0,
+        "mapping": "0=right"
+      },
+      "k3": {
+        "accuracy": 0.7594723029184424,
+        "n": 22,
+        "unassigned": 0,
+        "mapping": "0=right"
+      }
+    },
+    {
+      "clip": "SNGS-061",
+      "k2": {
+        "accuracy": 1.0,
+        "n": 21,
+        "unassigned": 0,
+        "mapping": "0=left"
+      },
+      "k3": {
+        "accuracy": 1.0,
+        "n": 21,
+        "unassigned": 0,
+        "mapping": "0=right"
+      }
+    },
+    {
+      "clip": "SNGS-062",
+      "k2": {
+        "accuracy": 0.9492816166517951,
+        "n": 24,
+        "unassigned": 0,
+        "mapping": "0=left"
+      },
+      "k3": {
+        "accuracy": 0.7113012620132461,
+        "n": 24,
+        "unassigned": 4,
+        "mapping": "0=right"
+      }
+    },
+    {
+      "clip": "SNGS-063",
+      "k2": {
+        "accuracy": 0.5144406810115334,
+        "n": 22,
+        "unassigned": 0,
+        "mapping": "0=right"
+      },
+      "k3": {
+        "accuracy": 0.9584666471542417,
+        "n": 22,
+        "unassigned": 0,
+        "mapping": "0=right"
+      }
+    },
+    {
+      "clip": "SNGS-064",
+      "k2": {
+        "accuracy": 0.8738128378462414,
+        "n": 27,
+        "unassigned": 0,
+        "mapping": "0=left"
+      },
+      "k3": {
+        "accuracy": 0.7460753294896737,
+        "n": 27,
+        "unassigned": 6,
+        "mapping": "0=left"
+      }
+    },
+    {
+      "clip": "SNGS-065",
+      "k2": {
+        "accuracy": 1.0,
+        "n": 22,
+        "unassigned": 0,
+        "mapping": "0=left"
+      },
+      "k3": {
+        "accuracy": 1.0,
+        "n": 22,
+        "unassigned": 0,
+        "mapping": "0=right"
+      }
+    }
+  ]
+}

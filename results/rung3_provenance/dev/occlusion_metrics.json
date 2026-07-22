@@ -1,0 +1,65 @@
+{
+  "occlusion_episodes": {
+    "n": 1510,
+    "both_endpoints": 1286,
+    "retained": 1170,
+    "switched": 116,
+    "one_or_no_endpoint": 224,
+    "endpoint_coverage": 0.8516556291390729,
+    "conditional_same_id_retention": 0.9097978227060654
+  },
+  "fragmentation": {
+    "mean_ids_per_gt": 3.30188679245283,
+    "single_id": 94,
+    "n_gt_track_instances": 424
+  },
+  "visibility_gaps": {
+    "interior": 2,
+    "frame_edge": 25,
+    "note": "edge gaps are exits/re-entries, not occlusions"
+  },
+  "params": {
+    "occ_thr": 0.3,
+    "iou_thr": 0.5,
+    "edge_px": 8.0,
+    "max_len": 30
+  },
+  "provenance": {
+    "git_sha": "5135b229b47d2d02ec285c0726bb66c71ee60801",
+    "python": "3.12.3",
+    "platform": "Linux-6.14.0-24-generic-x86_64-with-glibc2.39",
+    "split": {
+      "file": "outputs/gsr_splits.json",
+      "name": "test",
+      "n_seqs": 18
+    },
+    "detector": {
+      "weights": "runs/gsr_ft/l_1536_v2/weights/best.pt",
+      "sha256": "57d95785a996755a069a2932a42933738a925a95e3b2424e6727e30514339565",
+      "imgsz": 1536,
+      "conf": 0.25,
+      "classes": "0,1,2,3"
+    },
+    "tracker": {
+      "requested": "configs/trackers/botsort_newtrk040.yaml",
+      "resolved": "configs/trackers/botsort_newtrk040.yaml",
+      "sha256": "badb024982cea5cff3b2b8d670d5e7e6f922164fc2bc4bce4f8d53274d26d92a"
+    },
+    "args": {
+      "splits_file": "outputs/gsr_splits.json",
+      "split": "test",
+      "weights": "runs/gsr_ft/l_1536_v2/weights/best.pt",
+      "classes": "0,1,2,3",
+      "imgsz": 1536,
+      "conf": 0.25,
+      "tracker": "configs/trackers/botsort_newtrk040.yaml",
+      "device": "auto",
+      "max_seqs": null,
+      "occ_thr": 0.3,
+      "iou_thr": 0.5,
+      "edge_px": 8.0,
+      "max_len": 30,
+      "out_dir": "outputs/gsr_ft_dev"
+    }
+  }
+}
