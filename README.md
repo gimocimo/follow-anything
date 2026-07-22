@@ -4,7 +4,7 @@
 
 Football is the proving ground — dense, fast, near-identical targets and broadcast camera cuts make it tracking on *hard mode* — but the pipeline is **domain-agnostic**: the detector already knows people, cars and bikes, and SAM 2 will follow literally anything you click.
 
-> **Status: active build.** Three rungs shipped — a rigorous baseline, a promptable "follow one object" demo, and a football-fine-tuned detector that beats the baseline on a sealed match. Roadmap below.
+> **Status: active build.** Three rungs shipped — a rigorous baseline, a promptable "follow one object" demo, and a football-fine-tuned detector that beats the baseline on a held-out match, *provably* leave-one-game-out. Roadmap below.
 
 ![follow-anything demo — click a player, follow them](docs/demo.gif)
 
@@ -25,7 +25,7 @@ Given ordinary video, `follow-anything` aims to:
 |---|---|---|
 | 1 | Baseline tracking (YOLO + BoT-SORT) → **bbox-HOTA 0.481** on a held-out game | ✅ |
 | 2 | Promptable "click any object, follow it" (SAM 2) | ✅ demo |
-| 3 | Robust — fine-tuned detector + tuned tracker; **beat the baseline** → **HOTA 0.492 → 0.596** on the sealed match (provably leak-free) | ✅ |
+| 3 | Robust — fine-tuned detector + tuned tracker; **beat the baseline** → **HOTA 0.492 → 0.614** on the held-out final match (provably leave-one-game-out) | ✅ |
 | 4 | Permanence — re-acquire IDs across camera cuts | ⬜ |
 | 5 | Real-time / on-device — distil to live FPS | ⬜ |
 | 6 | 3D tactical replay — homography top-down → depth-lifted 3D | ⬜ |
@@ -42,16 +42,26 @@ Given ordinary video, `follow-anything` aims to:
 
 The untouched-final number (0.492) matches the dev number (0.481) — confirming the baseline isn't inflated by evaluation-selection on the dev game. Association (AssA ≈ 0.40) is the weaker half — the target for the next rungs. Every number carries a provenance manifest (git SHA, package versions, weight hash, category counts). SoccerNet's official metric is GS-HOTA over pitch coordinates (the rung-6 flagship).
 
-**Rung 3 — robust** (`scripts/08–10`): the detector fine-tuned on SoccerNet (yolo11m, trained **leave-one-game-out** on games {6,9}) + BoT-SORT with a tuned `new_track_thresh`. Scored with the *identical* sealed eval as Rung 1:
+**Rung 3 — robust** (`scripts/09–13`): the detector fine-tuned on SoccerNet — **yolo11l @ 1536, 4 classes** (player / goalkeeper / referee / ball), trained on **every frame of games {5,6,9}** with **game 3 held out entirely as cross-match validation** — plus BoT-SORT with a tuned `new_track_thresh`. Scored with the *identical* eval as Rung 1:
 
 | set | HOTA | DetA | AssA | MOTA | IDF1 | IDSW |
 |---|---|---|---|---|---|---|
-| dev (`train` game 4) | 0.481 → **0.625** | 0.611 → 0.719 | 0.381 → 0.543 | 0.734 → 0.885 | 0.541 → 0.725 | 2339 → 977 |
-| **sealed final** (`valid` game 2) | **0.492 → 0.596** | 0.602 → 0.708 | 0.403 → 0.503 | 0.714 → 0.857 | 0.551 → 0.678 | 1869 → **971** |
+| dev (`train` game 4) | 0.481 → **0.634** | 0.611 → 0.731 | 0.381 → 0.551 | 0.734 → 0.897 | 0.541 → 0.731 | 2339 → 921 |
+| **held-out final** (`valid` game 2) | **0.492 → 0.614** | 0.602 → 0.722 | 0.403 → 0.523 | 0.714 → 0.874 | 0.551 → 0.694 | 1869 → **868** |
 
-**+21% HOTA on the sealed match, every metric up, ID switches ~halved** — and dev (0.625) ≈ final (0.596), so the gain generalises across matches rather than overfitting the dev game. The detector was fine-tuned on a **`{6,9}`-only export whose every file is hash-verified immediately before *and* after training** — provably leave-one-game-out (it never saw game 4 or game 2). The unbroken chain `export_sha256 → train_manifest → checkpoint SHA → metrics` is committed in [`results/rung3_provenance/`](results/rung3_provenance/), so the claim is auditable rather than asserted. What moved it: an ablation showed **detector strength dominates** (~3–4× the tracker-tuning gain; 3.4× when matched on the same clips), and fine-tuned yolo11m even beats *zero-shot* yolo11x (0.564) — domain adaptation > raw model size.
+**+25% HOTA on the final match, every metric up, ID switches more than halved** — and dev (0.634) ≈ final (0.614), so the gain generalises across matches rather than overfitting the dev game.
 
-**Honest caveat — per-class (`scripts/11_perclass_eval.py`, dev):** the win is *people-driven*. The person class (players + goalkeepers + referees) reaches HOTA **0.64**, but the **ball only 0.12** (DetA **0.15** — rarely caught: ~10 px, fast, single-instance, ~6% of the fine-tuning boxes). Fixing ball tracking — higher-res/crop inference, ball oversampling, ball-specific tracker params — is the explicit next target. **Occlusion & identity** (`scripts/12_occlusion_eval.py`, dev — ⚠️ *metric under revision, do not cite yet*): across **1,510 per-person box-overlap episodes** (a player overlapped by another at IoU ≥ 0.3, entered and exited interior to the frame, ≤ 30 frames long), the tracker's ID at the two **endpoints** matches ~**91%** of the time (endpoint coverage ~**85%**). **That is an endpoint statistic, not "identity survives occlusion."** An adversarial audit found that only ~67% of episodes are detected *continuously* throughout, some endpoint-"retained" cases break identity mid-episode and recover, longer overlaps (>30 frames, currently excluded) retain identity only ~**68%**, and the 1,510 count double-counts mirrored pairs rather than being 1,510 distinct occlusions. The benchmark is being **duration-stratified, renamed to what it measures, and unit-tested** before any conclusion is drawn from it. What *is* solid: fragmentation — each player track-instance is covered by **2.8 tracker IDs** on average (only **26%** single-ID). *(A previous "≈4% occlusion recovery" figure was withdrawn for a related error — measuring frame-edge exits. Both corrections are logged in [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) §7.)* Provenance: [`results/rung3_baseline.json`](results/rung3_baseline.json).
+**Provably leave-one-game-out.** The training set is a hash-fingerprinted export of games {5,6,9} (game 3 used for validation only), re-verified byte-for-byte immediately before *and* after training. The part that actually matters: an `on_train_start` guard authenticates **what ultralytics itself enumerated** — checking the train and val loaders *separately* against their inventory subsets, comparing paths lexically so an aliased directory is caught by name, and **hashing every label the loader consumes**. That closes two bypasses an adversarial review reproduced end-to-end: pulling the held-out val images into the train loader (a union-of-paths check sees no change), and aliasing manifested images under a new directory carrying attacker-controlled labels. The unbroken chain `export_sha256 98cfbc8f… → train_manifest → best.pt 57d95785… → both eval manifests` is committed in [`results/rung3_provenance/`](results/rung3_provenance/), and [`results/rung3_baseline.json`](results/rung3_baseline.json) is **generated** from it by `scripts/13_make_results.py` — 14 cross-bound links, every one derived from evidence and failing closed, so the claim is auditable rather than asserted. What moved the number: an ablation showed **detector strength dominates** (~3.4× the tracker-tuning gain, matched on the same clips), and a fine-tuned mid-size model beats *zero-shot* yolo11x (0.564) — domain adaptation > raw model size.
+
+**Honest caveats.**
+
+- **The win is people-driven.** Per-class on dev (`scripts/11_perclass_eval.py`): person (players + goalkeepers + referees) reaches HOTA **0.651**, but the **ball only 0.158** (DetA **0.201**) — ~10 px, fast, single-instance. A 1920-resolution probe made *every* metric slightly **worse**, so resolution is **not** the ball's bottleneck; it needs a dedicated approach (context-guided crops, a temporal ball model) and is scoped as its own sub-project rather than claimed as solved.
+- **The detector is data-diversity-limited, not compute-limited.** Validation on the unseen match peaks at **epoch 1**, and ten further epochs never beat it (early-stop at 11). SN-GSR's labelled `train`+`valid` contains only **6 games** {2,3,4,5,6,9} — 4 is the dev benchmark and 2 the final — so {3,5,6,9} is *all* the match diversity that exists. More epochs or a bigger model cannot fix cross-match generalisation here.
+- **Occlusion & identity** (`scripts/12_occlusion_eval.py`, dev, unit-tested): across **1,510 per-person box-overlap episodes** (a player overlapped by another at IoU ≥ 0.3, entering and exiting interior to the frame), endpoint coverage is **85.2%** and — *conditional on both endpoints being seen* — the ID is retained **91.0%** of the time. Deliberately reported as four separate quantities: this is **not** "identity survives occlusion". The real weakness is fragmentation — **3.30 tracker-IDs per player track-instance, only 22% single-ID** — so the Rung-4 target is **detection continuity**, not re-ID. *(An earlier "≈4% occlusion recovery" figure and a "91% survives occlusion" reading were both withdrawn after adversarial audits; the corrections are logged in [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) §7.)*
+- **Team assignment** (`scripts/15_team_eval.py`, kit-chroma clustering, unsupervised): **85.5%** against GSR team labels over 138 player tracks.
+- **Game 2 is a reused, held-out, game-disjoint benchmark — not a pristine one-shot.** It has now been scored on ~4 checkpoints across iterations. With only 6 labelled games there is no unseen match left to reserve, so we disclose the reuse rather than overclaim the seal.
+
+Provenance for every number above: [`results/rung3_baseline.json`](results/rung3_baseline.json).
 
 **Rung 2 — promptable demo** (`scripts/07_promptable_demo.py`): give one object a click/box on the first frame and SAM 2 propagates the mask through the clip, rendering a *spotlight-that-object* video. Runs on Apple MPS; tracked the prompted player in 72/90 frames of a test clip.
 
