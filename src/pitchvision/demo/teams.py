@@ -15,23 +15,62 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-import cv2
 import numpy as np
+
+
+def _torso_rect(box):
+    """The torso sub-rectangle sampled for kit colour (skips head, shorts and grass)."""
+    x1, y1, x2, y2 = box
+    h, w = y2 - y1, x2 - x1
+    return (x1 + 0.25 * w, y1 + 0.15 * h, x1 + 0.75 * w, y1 + 0.45 * h)
 
 
 def torso_color(frame, box, min_h=26):
     """Median Lab colour of the torso patch (skips head, shorts and grass)."""
+    import cv2  # lazy: keep the pure clustering/geometry importable without OpenCV (e.g. in CI)
     x1, y1, x2, y2 = box
-    h, w = y2 - y1, x2 - x1
-    if h < min_h or w < 8:
+    if (y2 - y1) < min_h or (x2 - x1) < 8:
         return None
-    ty1, ty2 = int(y1 + 0.15 * h), int(y1 + 0.45 * h)
-    tx1, tx2 = int(x1 + 0.25 * w), int(x1 + 0.75 * w)
+    tx1, ty1, tx2, ty2 = (int(v) for v in _torso_rect(box))
     patch = frame[max(0, ty1):max(0, ty2), max(0, tx1):max(0, tx2)]
     if patch.size == 0:
         return None
     lab = cv2.cvtColor(patch, cv2.COLOR_BGR2LAB).reshape(-1, 3).astype(np.float32)
     return np.median(lab, axis=0)
+
+
+def torso_occlusion(box, others):
+    """Fraction of THIS box's torso rectangle covered by the nearest OTHER box — the reason a
+    torso-colour sample gets contaminated by a different shirt. 0 = clear view, ~1 = fully
+    overlapped by another player."""
+    tx1, ty1, tx2, ty2 = _torso_rect(box)
+    ta = max(0.0, tx2 - tx1) * max(0.0, ty2 - ty1)
+    if ta <= 0:
+        return 1.0
+    worst = 0.0
+    for o in others:
+        inter = (max(0.0, min(tx2, o[2]) - max(tx1, o[0]))
+                 * max(0.0, min(ty2, o[3]) - max(ty1, o[1])))
+        worst = max(worst, inter)
+    return worst / ta
+
+
+def sample_frame(frame, dets, occ_thr=0.2):
+    """Sample torso colours for one frame's PLAYER detections.
+
+    `dets`: [(track_id, conf, box)]. Yields (track_id, lab, weight, occluded): `weight` is the
+    detection confidence, and `occluded` flags a torso another player's box intrudes on (so its
+    colour is the WRONG shirt). Sampling every player with its neighbours known is what lets the
+    caller keep only clean views per track — the dominant fix for A<->B team flips."""
+    boxes = [d[2] for d in dets]
+    out = []
+    for i, (tid, conf, box) in enumerate(dets):
+        lab = torso_color(frame, box)
+        if lab is None:
+            continue
+        occ = torso_occlusion(box, boxes[:i] + boxes[i + 1:])
+        out.append((tid, lab, float(conf), occ >= occ_thr))
+    return out
 
 
 def _kmeans(X, init, iters=40):
@@ -55,40 +94,73 @@ def best_kmeans(X, k, restarts=15, seed=0):
     return best[0], best[1]
 
 
-def assign_teams(track_colors, min_samples=3, k=3, weights=None):
-    """track_id -> 0 | 1 | None(other).
+def _track_mean(samples, min_samples, occlusion_aware, conf_weighted):
+    """Per-track weighted-mean torso colour + provenance. Prefers un-occluded views, falling back
+    to all views only when too few are clean."""
+    clean = [(lab, w) for lab, w, occ in samples if not occ]
+    used_clean = occlusion_aware and len(clean) >= min_samples
+    used = clean if used_clean else [(lab, w) for lab, w, _ in samples]
+    if len(used) < min_samples:
+        return None
+    labs = np.stack([lab for lab, _ in used])
+    ws = (np.array([max(w, 1e-6) for _, w in used], np.float32) if conf_weighted
+          else np.ones(len(used), np.float32))
+    mean = (labs * ws[:, None]).sum(0) / ws.sum()
+    return mean, {"n_clean": len(clean), "n_total": len(samples), "used_clean": used_clean}
 
-    Clusters the PER-TRACK mean torso colour in chroma space (Lab a*/b* only — luminance
-    mostly encodes lighting, which would split players by how sunlit they are). Uses k=3 and
-    keeps the two largest clusters as the squads, so a referee (often further from both teams
-    than they are from each other) forms its own group instead of hijacking one.
 
-    `weights` optionally maps track_id -> confidence weight (e.g. mean box area), so distant,
-    few-pixel tracks influence the centroids less than close, well-observed ones.
+def assign_teams(track_samples, min_samples=3, k=3, occlusion_aware=True, conf_weighted=True):
+    """track_id -> (0 | 1 | None(other)), plus a per-track confidence dict.
+
+    Clusters the PER-TRACK mean torso colour in chroma space (Lab a*/b* only — luminance mostly
+    encodes lighting, which would split players by how sunlit they are). Uses k=3 and keeps the two
+    largest clusters as the squads, so a referee (usually further from both teams than they are
+    from each other) forms its own group instead of hijacking one.
+
+    Two robustness levers, each measurable via scripts/15_team_eval.py against GSR team labels:
+    **occlusion-aware** sampling keeps only frames where no other player intrudes on the torso (the
+    dominant cause of A<->B flips — an overlapping opponent paints the wrong shirt into the patch),
+    and **confidence-weighted** averaging lets crisp, high-confidence detections outvote marginal
+    few-pixel ones. Pass both False to reproduce the naive baseline.
+
+    `track_samples`: {track_id: [(lab, weight, occluded), ...]} as produced by `sample_frame`.
+    Returns (team_of, conf_of). conf_of[tid] = {margin, confidence, n_clean, n_total, occl_frac}:
+    `margin` in [-1, 1] is (d_other - d_self) / (d_other + d_self) to the two squad centroids (how
+    much closer this track sits to its assigned kit than to the other), and `confidence` folds in
+    how many clean samples backed it — so low-margin / thinly-observed tracks are flagged, not
+    trusted.
     """
-    means = {t: np.mean(v, axis=0) for t, v in track_colors.items() if len(v) >= min_samples}
+    means, meta = {}, {}
+    for t, samples in track_samples.items():
+        r = _track_mean(samples, min_samples, occlusion_aware, conf_weighted)
+        if r is not None:
+            means[t], meta[t] = r
     if len(means) < 6:
-        return {}
+        return {}, {}
     tids = list(means)
     X = np.stack([means[t] for t in tids])[:, 1:].astype(np.float32)   # a*, b*
     k = min(k, len(X))
-
-    # NB: fitting centroids only on well-observed tracks was tried and MEASURED — it left k=2
-    # unchanged (0.916) and degraded k=3 (0.916 -> 0.857), so it is deliberately not used.
-    # The colour heuristic appears to be near its ceiling; the principled fix is to exclude
-    # officials using the detector's predicted role (see the 4-class training recipe).
     lab, C = best_kmeans(X, k)
-    if weights:                       # weight reliable tracks more when refining centroids
-        for c in range(k):
-            m = lab == c
-            if m.any():
-                w = np.array([max(weights.get(tids[i], 1.0), 1e-6) for i in np.where(m)[0]], dtype=np.float32)
-                C[c] = (X[m] * w[:, None]).sum(0) / w.sum()
-        lab = ((X[:, None, :] - C[None, :, :]) ** 2).sum(-1).argmin(1)
     sizes = [(lab == c).sum() for c in range(k)]
     teams = list(np.argsort(sizes)[::-1][:2])
     remap = {int(c): (0 if c == teams[0] else 1) for c in teams}
-    return {t: remap.get(int(lab[i])) for i, t in enumerate(tids)}
+    cen = {0: C[teams[0]], 1: C[teams[1]]}
+    team_of, conf_of = {}, {}
+    for i, t in enumerate(tids):
+        team = remap.get(int(lab[i]))
+        if team in (0, 1):
+            d_self = float(np.linalg.norm(X[i] - cen[team]))
+            d_other = float(np.linalg.norm(X[i] - cen[1 - team]))
+            margin = (d_other - d_self) / (d_other + d_self + 1e-6)
+        else:
+            margin = 0.0
+        backing = meta[t]["n_clean"] if meta[t]["used_clean"] else 0.5 * meta[t]["n_total"]
+        conf = max(0.0, margin) * min(1.0, backing / (2 * min_samples))
+        team_of[t] = team
+        conf_of[t] = {"margin": round(float(margin), 3), "confidence": round(float(conf), 3),
+                      "n_clean": meta[t]["n_clean"], "n_total": meta[t]["n_total"],
+                      "occl_frac": round(1 - meta[t]["n_clean"] / max(1, meta[t]["n_total"]), 3)}
+    return team_of, conf_of
 
 
 # ---------------- ground truth (SN-GSR-2025 attributes) ----------------

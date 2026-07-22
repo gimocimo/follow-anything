@@ -28,7 +28,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pitchvision.config import get_device
-from pitchvision.demo.teams import assign_teams, torso_color
+from pitchvision.demo.teams import assign_teams, sample_frame
 from pitchvision.pipeline.run_video import _resolve_tracker
 
 TEAM_BGR = [(64, 64, 232), (232, 150, 64)]      # kit A (red), kit B (blue)
@@ -91,7 +91,7 @@ def main():
     ball_ids = {i for i, nm in names.items() if nm == "ball"}
     player_ids = {i for i, nm in names.items() if nm in ("player", "person")}
     print(f"  classes: {names}", flush=True)
-    cached, track_colors, n = [], defaultdict(list), 0
+    cached, track_samples, n = [], defaultdict(list), 0
     for r in results:
         if n >= args.max_frames:
             break
@@ -102,22 +102,27 @@ def main():
             xyxy = b.xyxy.cpu().numpy()
             ids = b.id.cpu().numpy().astype(int)
             cls = b.cls.cpu().numpy().astype(int)
-            for (x1, y1, x2, y2), tid, c in zip(xyxy, ids, cls):
+            confs = b.conf.cpu().numpy()
+            players = []
+            for (x1, y1, x2, y2), tid, c, cf in zip(xyxy, ids, cls, confs):
                 box = (int(x1), int(y1), int(x2), int(y2))
-                dets.append((int(tid), int(c), box))
-                if c in player_ids and frame is not None:
-                    col = torso_color(frame, box)
-                    if col is not None:
-                        track_colors[int(tid)].append(col)
+                dets.append((int(tid), int(c), box, float(cf)))
+                if c in player_ids:
+                    players.append((int(tid), float(cf), box))
+            if frame is not None:
+                for tid, lab, w, occ in sample_frame(frame, players):
+                    track_samples[int(tid)].append((lab, w, occ))
         cached.append((r.path, dets))
         n += 1
         if n % 100 == 0:
             print(f"  tracked {n} frames ...", flush=True)
 
-    team_of = {} if args.no_teams else assign_teams(track_colors)
+    team_of, conf_of = ({}, {}) if args.no_teams else assign_teams(track_samples)
     n_a = sum(1 for v in team_of.values() if v == 0)
     n_b = sum(1 for v in team_of.values() if v == 1)
-    print(f"  teams from kit colour: A={n_a} tracks, B={n_b}, other/GK/ref={sum(1 for v in team_of.values() if v is None)}")
+    low = sum(1 for cv in conf_of.values() if cv["margin"] < 0.15)
+    print(f"  teams from kit colour: A={n_a} tracks, B={n_b}, "
+          f"other/GK/ref={sum(1 for v in team_of.values() if v is None)}  |  {low} low-confidence (flagged '?')")
 
     # ---- pass 2: render (no inference; just re-read + draw) ----
     writer, trails = None, defaultdict(lambda: deque(maxlen=max(1, args.trail)))
@@ -126,7 +131,7 @@ def main():
         if frame is None:
             continue
         live = 0
-        for tid, c, (x1, y1, x2, y2) in dets:
+        for tid, c, (x1, y1, x2, y2), cf in dets:
             if c in ball_ids:
                 cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                 cv2.circle(frame, (cx, cy), 13, BALL_BGR, 2, cv2.LINE_AA)
@@ -135,27 +140,31 @@ def main():
                 continue
             live += 1
             role = role_of.get(c, "player")
+            uncertain = False
             if role == "goalkeeper":
                 col = GK_BGR
             elif role == "referee":
                 col = REF_BGR
             else:
                 t = team_of.get(tid, None)
-                col = TEAM_BGR[t] if t in (0, 1) else OTHER_BGR
+                uncertain = t not in (0, 1) or conf_of.get(tid, {}).get("margin", 0.0) < 0.15
+                col = OTHER_BGR if uncertain else TEAM_BGR[t]
             cv2.rectangle(frame, (x1, y1), (x2, y2), col, 2, cv2.LINE_AA)
-            lab = str(tid)
+            lab = f"{tid}?" if uncertain else str(tid)
             (tw, th), _ = cv2.getTextSize(lab, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             cv2.rectangle(frame, (x1, y1 - th - 7), (x1 + tw + 8, y1), col, -1)
             cv2.putText(frame, lab, (x1 + 4, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX,
                         0.5, (20, 20, 20), 1, cv2.LINE_AA)
+            cv2.putText(frame, f"{cf:.2f}", (x1 + 2, y2 - 3), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4, col, 1, cv2.LINE_AA)   # the detector's OWN confidence for this box
             if args.trail:
                 trails[tid].append(((x1 + x2) // 2, y2))
                 pts = list(trails[tid])
                 for i in range(1, len(pts)):
                     cv2.line(frame, pts[i - 1], pts[i], col, max(1, int(3 * i / len(pts))), cv2.LINE_AA)
 
-        sub = ("fine-tuned YOLO11 + BoT-SORT  |  roles predicted, teams clustered from kit colour  |  "
-               f"{clip.name} — held-out match (never trained on)")
+        sub = ("fine-tuned YOLO11 + BoT-SORT  |  team = kit-colour cluster ('?' + amber = low confidence)  |  "
+               f"number under box = detector conf  |  {clip.name} — held-out match")
         draw_header(frame, f"follow-anything  |  {live} players tracked simultaneously", sub)
         if args.scale != 1.0:
             frame = cv2.resize(frame, None, fx=args.scale, fy=args.scale, interpolation=cv2.INTER_AREA)

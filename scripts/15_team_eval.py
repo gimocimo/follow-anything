@@ -11,11 +11,12 @@ import argparse, json, sys
 from collections import defaultdict
 from pathlib import Path
 import cv2
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pitchvision.config import get_device
-from pitchvision.demo.teams import (assign_teams, gt_team_boxes, score_assignment,
-                                    torso_color, true_team_of_tracks)
+from pitchvision.demo.teams import (assign_teams, gt_team_boxes, sample_frame, score_assignment,
+                                    true_team_of_tracks)
 from pitchvision.pipeline.run_video import _resolve_tracker
 
 
@@ -38,11 +39,13 @@ def main():
     from ultralytics import YOLO
     seqs = json.loads(Path(args.splits_file).read_text())[args.split][: args.max_seqs]
     model = YOLO(args.weights)
-    per_clip, tot_w, tot_n = [], 0.0, 0
-    acc_by_k = {}
+    ks = [int(x) for x in args.ks.split(",")]
+    per_clip = []
+    # A/B: naive (all torso samples, unweighted) vs occlusion-aware + confidence-weighted.
+    agg = {kv: {"naive": [0.0, 0], "improved": [0.0, 0]} for kv in ks}
 
     for s in seqs:
-        colors, boxes, areas = defaultdict(list), defaultdict(list), defaultdict(list)
+        samples, boxes, areas = defaultdict(list), defaultdict(list), defaultdict(list)
         res = model.track(source=str(Path(s["path"]) / "img1"),
                           classes=[int(c) for c in args.classes.split(",")], conf=args.conf,
                           imgsz=args.imgsz, tracker=_resolve_tracker(args.tracker), persist=True,
@@ -56,37 +59,48 @@ def main():
             frame = cv2.imread(r.path)
             digits = "".join(c for c in Path(r.path).stem if c.isdigit())
             fr = int(digits) if digits else n + 1
-            for (x1, y1, x2, y2), tid, cl in zip(b.xyxy.cpu().numpy(), b.id.cpu().numpy().astype(int),
-                                                 b.cls.cpu().numpy().astype(int)):
+            dets = []
+            for (x1, y1, x2, y2), tid, cl, cf in zip(
+                    b.xyxy.cpu().numpy(), b.id.cpu().numpy().astype(int),
+                    b.cls.cpu().numpy().astype(int), b.conf.cpu().numpy()):
                 if cl != 0:
                     continue
                 box = (int(x1), int(y1), int(x2), int(y2))
                 boxes[int(tid)].append((fr, (float(x1), float(y1), float(x2 - x1), float(y2 - y1))))
                 areas[int(tid)].append((x2 - x1) * (y2 - y1))
-                c = torso_color(frame, box) if frame is not None else None
-                if c is not None:
-                    colors[int(tid)].append(c)
-        weights = {t: float(sum(v) / len(v)) for t, v in areas.items()}
+                dets.append((int(tid), float(cf), box))
+            if frame is not None:
+                for tid, lab, w, occ in sample_frame(frame, dets):
+                    samples[tid].append((lab, w, occ))
+        weights = {t: float(sum(v) / len(v)) for t, v in areas.items()}   # area-weight the ACCURACY
         truth = true_team_of_tracks(boxes, gt_team_boxes(s["labels"]))
         row = {"clip": s["name"]}
-        for kv in [int(x) for x in args.ks.split(",")]:
-            sc = score_assignment(assign_teams(colors, k=kv, weights=weights), truth, weights=weights)
-            row[f"k{kv}"] = sc
-            if sc["accuracy"] is not None:
-                acc_by_k.setdefault(kv, [0.0, 0])
-                acc_by_k[kv][0] += sc["accuracy"] * sc["n"]; acc_by_k[kv][1] += sc["n"]
+        for kv in ks:
+            naive, _ = assign_teams(samples, k=kv, occlusion_aware=False, conf_weighted=False)
+            impr, conf = assign_teams(samples, k=kv)
+            sc_n = score_assignment(naive, truth, weights=weights)
+            sc_i = score_assignment(impr, truth, weights=weights)
+            mc = round(float(np.mean([c["confidence"] for c in conf.values()])), 3) if conf else None
+            row[f"k{kv}"] = {"naive": sc_n, "improved": sc_i, "mean_confidence": mc}
+            for key, sc in (("naive", sc_n), ("improved", sc_i)):
+                if sc["accuracy"] is not None:
+                    agg[kv][key][0] += sc["accuracy"] * sc["n"]
+                    agg[kv][key][1] += sc["n"]
         per_clip.append(row)
         print("  " + s["name"] + "  " + "  ".join(
-            f"k={kv}:{row[f'k{kv}']['accuracy']:.3f}" if row[f'k{kv}']['accuracy'] is not None else f"k={kv}:n/a"
-            for kv in [int(x) for x in args.ks.split(",")]), flush=True)
+            (f"k{kv}: {row[f'k{kv}']['naive']['accuracy']:.3f}->{row[f'k{kv}']['improved']['accuracy']:.3f}"
+             if row[f'k{kv}']['improved']['accuracy'] is not None else f"k{kv}:n/a") for kv in ks), flush=True)
 
-    print("\n==== team assignment vs GSR labels (weighted accuracy) ====")
-    for kv, (w, n) in sorted(acc_by_k.items()):
-        print(f"  k={kv}:  {w/n:.4f}  over {n} player tracks")
-    overall = max((w/n for w, n in acc_by_k.values()), default=None)
+    print("\n==== team assignment vs GSR labels (weighted accuracy: naive -> occlusion-aware + conf-weighted) ====")
+    best = None
+    for kv in ks:
+        (nw, nn), (iw, ino) = agg[kv]["naive"], agg[kv]["improved"]
+        nv, iv = (nw / nn if nn else float("nan")), (iw / ino if ino else float("nan"))
+        print(f"  k={kv}:  {nv:.4f} -> {iv:.4f}  ({iv - nv:+.4f})  over {ino} player tracks", flush=True)
+        if ino:
+            best = iv if best is None else max(best, iv)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.out).write_text(json.dumps({"overall_accuracy": overall, "n_tracks": tot_n,
-                                          "per_clip": per_clip}, indent=2))
+    Path(args.out).write_text(json.dumps({"overall_accuracy": best, "per_clip": per_clip}, indent=2))
     print(f"saved -> {args.out}")
 
 
