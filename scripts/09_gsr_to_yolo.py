@@ -5,10 +5,12 @@
 game via --games, so the fine-tuned detector never sees a frame from its evaluation
 game. This is the same anti-leakage invariant (PROJECT_PLAN §3) enforced everywhere else.
     Current recipe:  --games 3,5,6,9   (games 3,5 live in `valid`, games 6,9 in `train`)
-    -> ONE model, disjoint from BOTH eval games (train game 4 = dev, valid game 2 = sealed
-       final), so dev and final are scored by the *identical* checkpoint. Games 3 and 5 were
-       previously unused; adding them ~doubles the match diversity while keeping games 4 and 2
-       untouched. NB: this deliberately departs from SoccerNet's split convention (it trains on
+    -> ONE model, disjoint from BOTH eval games (train game 4 = dev, valid game 2 = the
+       held-out final), so dev and final are scored by the *identical* checkpoint. Games 3 and 5
+       were previously unused; adding them ~doubles the match diversity while keeping games 4 and 2
+       out of training entirely. NB: game 2 is a held-out, game-disjoint benchmark that has been
+       re-scored across model iterations — it is NOT a pristine one-shot (PROJECT_PLAN §7).
+       NB: this deliberately departs from SoccerNet's split convention (it trains on
        part of `valid`) — leak-free under OUR protocol, but disclose it before comparing against
        published SoccerNet numbers.
 

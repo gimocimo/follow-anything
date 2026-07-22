@@ -8,7 +8,8 @@ For the downloaded `train` games (ids 4, 6, 9) this yields the committed split
 
 Roles (PROJECT_PLAN §4): game 4 (the `train`-source split's "test") is the
 **development benchmark** — it has been inspected during development. The
-**untouched final-confirmation set** is the official `valid` split; build it with
+**final-confirmation set** is the official `valid` split (held-out, game-disjoint;
+re-scored across model iterations, so NOT a pristine one-shot — PROJECT_PLAN §7); build it with
 `--source-split valid` once downloaded.
 
 Fails closed: requires `info.game_id` on every clip (no silent fallback grouping),

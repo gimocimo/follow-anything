@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Rung 3 experiment harness: sweep detector/tracker configs on the DEV set and rank
-by HOTA, reusing the EXACT sealed eval path (scripts/06_gsr_baseline_eval.py) so every
+by HOTA, reusing the EXACT committed eval path (scripts/06_gsr_baseline_eval.py) so every
 number is directly comparable to the committed baseline (dev 0.481 / final 0.492).
 
-All tuning happens on DEV (train game 4). The sealed final set (valid game 2) is NEVER
-touched here — the winning config is confirmed once, separately, at the end of the rung.
+All tuning happens on DEV (train game 4). The held-out final set (valid game 2) is NEVER
+touched here — the winning config is confirmed separately at the end of the rung. (That final
+set is game-disjoint and never trained on, but it HAS been re-scored across model iterations,
+so it is not a pristine one-shot — see PROJECT_PLAN §7.)
 
     python scripts/08_rung3_sweep.py --set A                 # association sweep (yolo11n)
     python scripts/08_rung3_sweep.py --set B                 # detector sweep
@@ -168,7 +170,7 @@ def main():
         print(f"{r['name']:20s} {r['HOTA']:8.4f} {d:>8} {r['DetA']:7.4f} "
               f"{r['AssA']:7.4f} {r['MOTA']:7.4f} {r['IDF1']:7.4f} {r['IDSW']:6d}")
     print(f"\n(ΔHOTA vs {ref_label} = {ref:.4f}; ΔHOTA > 0 beats it on DEV — "
-          f"final-set confirmation is separate & one-shot)")
+          f"final-set confirmation is separate)")
     if in_run_base is not None and base:
         print(f" in-run baseline {in_run_base:.4f} vs committed {base:.4f} "
               f"(Δ {in_run_base-base:+.4f} — should be ~0 if the harness reproduces)")

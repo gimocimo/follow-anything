@@ -27,6 +27,8 @@ import json
 import os
 from pathlib import Path
 
+import numpy as np
+
 try:  # match the loader's own notion of "an image" rather than guessing
     from ultralytics.data.utils import IMG_FORMATS as _FMTS
     IMG_EXTS = tuple(f".{e.lower().lstrip('.')}" for e in _FMTS)
@@ -66,7 +68,57 @@ def _relpaths(root_str, files):
     return {Path(os.path.relpath(str(f), root_str)).as_posix() for f in files}
 
 
-def authenticate_loader(dataset_dir, inv, train_files, val_files) -> dict:
+def parse_label_file(path):
+    """(cls, (cx,cy,w,h)) rows, exactly as ultralytics parses a YOLO label file."""
+    rows = []
+    txt = Path(path).read_text().strip()
+    if not txt:
+        return rows
+    for ln in txt.splitlines():
+        p = ln.split()
+        if len(p) >= 5:
+            rows.append((int(float(p[0])), tuple(float(x) for x in p[1:5])))
+    return rows
+
+
+def labels_in_memory_mismatched(dataset_dir, label_entries, tol=1e-4):
+    """Compare ultralytics' PARSED in-memory annotations against the authenticated .txt on disk.
+
+    Hashing the .txt files is NOT sufficient. Ultralytics writes `labels/{train,val}.cache` and
+    loads it *before* `on_train_start`; while a valid cache exists the .txt files are never re-read,
+    so a poisoned cache trains on annotations the .txt files do not contain — the manifest would
+    still say every label hashed clean (adversarial review, round 5). This authenticates what the
+    model will actually consume: `dataset.labels`.
+    """
+    root = str(Path(dataset_dir).resolve())
+    mismatched = []
+    for lab in (label_entries or []):
+        im = (lab or {}).get("im_file")
+        if im is None:
+            mismatched.append("<label entry without im_file>")
+            continue
+        rel = Path(os.path.relpath(str(im), root)).as_posix()
+        lbl = Path(dataset_dir) / (rel.replace("images", "labels", 1).rsplit(".", 1)[0] + ".txt")
+        if not lbl.exists():
+            mismatched.append(rel)
+            continue
+        want = parse_label_file(lbl)
+        try:
+            cls = [int(float(c)) for c in np.asarray(lab["cls"]).reshape(-1)]
+            box = [tuple(float(v) for v in row) for row in np.asarray(lab["bboxes"]).reshape(-1, 4)]
+        except Exception:
+            mismatched.append(rel)
+            continue
+        got = list(zip(cls, box))
+        if len(got) != len(want) or not all(
+                gc == wc and all(abs(g - w) <= tol for g, w in zip(gb, wb))
+                for (gc, gb), (wc, wb) in zip(got, want)):
+            mismatched.append(rel)
+    return mismatched
+
+
+def authenticate_loader(dataset_dir, inv, train_files, val_files,
+                        train_labels=None, val_labels=None) -> dict:
     """Authoritative loader check — SPLIT-AWARE and LABEL-AWARE.
 
     Adversarial review (2026-07) broke the weaker guards: verifying the *directory* or the
@@ -110,11 +162,29 @@ def authenticate_loader(dataset_dir, inv, train_files, val_files) -> dict:
         if want is None or not p.exists() or sha256_file(p) != want:
             bad.append(lbl_rel)
     if bad:
-        problems.append(f"consumed labels not authenticated ({len(bad)}): {bad[:3]}")
+        problems.append(f"consumed labels not authenticated on disk ({len(bad)}): {bad[:3]}")
+
+    # ...and what ultralytics actually PARSED. A poisoned labels/*.cache is read before
+    # on_train_start and makes the on-disk .txt irrelevant, so the disk hash alone proves nothing.
+    # FAILS CLOSED when the in-memory annotations are unavailable.
+    if train_labels is None or val_labels is None:
+        mem_bad = ["<in-memory labels unavailable — cannot authenticate what the loader parsed>"]
+        n_checked = 0
+    else:
+        mem_bad = (labels_in_memory_mismatched(dataset_dir, train_labels)
+                   + labels_in_memory_mismatched(dataset_dir, val_labels))
+        n_checked = len(train_labels) + len(val_labels)
+        if n_checked != len(tr) + len(va):
+            problems.append(f"in-memory label count {n_checked} != loader image count {len(tr) + len(va)}")
+    if mem_bad:
+        problems.append(f"in-memory labels differ from the authenticated .txt "
+                        f"({len(mem_bad)}): {mem_bad[:3]}")
 
     return {"ok": not problems, "n_train": len(tr), "n_val": len(va), "n_files": len(tr | va),
             "train_matches_manifest": tr == exp["train"], "val_matches_manifest": va == exp["val"],
-            "labels_authenticated": not bad, "problems": problems}
+            "labels_authenticated": not bad,
+            "in_memory_labels_authenticated": not mem_bad, "n_labels_checked": n_checked,
+            "problems": problems}
 
 
 def verify_export(dataset_dir) -> dict:
@@ -148,19 +218,17 @@ def verify_export(dataset_dir) -> dict:
         if hashlib.sha256(lbl.read_bytes()).hexdigest() != e.get("label_sha256"):
             modified.append(f"{key} (label)")
 
-    # EXTRA: walk the whole tree recursively; anything the loader could read that the
-    # manifest does not authorise (by exact relative path) is drift.
+    # EXTRA: walk the whole tree recursively; ANY file the manifest does not authorise (by exact
+    # relative path) is drift — no extension filter. The previous scan only considered image
+    # extensions and `.txt`, which silently ignored ultralytics' `labels/*.cache` — the file the
+    # loader actually reads instead of the .txt labels (adversarial review, round 5).
     extra = []
-    for p in sorted((d / "images").rglob("*")):
-        if p.is_file() and p.suffix.lower() in IMG_EXTS:
-            rel = p.relative_to(d).as_posix()
-            if rel not in exp_imgs:
-                extra.append(rel)
-    for p in sorted((d / "labels").rglob("*")):
-        if p.is_file() and p.suffix.lower() == ".txt":
-            rel = p.relative_to(d).as_posix()
-            if rel not in exp_lbls:
-                extra.append(rel)
+    for sub, allowed in (("images", exp_imgs), ("labels", exp_lbls)):
+        for p in sorted((d / sub).rglob("*")):
+            if p.is_file():
+                rel = p.relative_to(d).as_posix()
+                if rel not in allowed:
+                    extra.append(rel)
 
     fp_match = inventory_fingerprint(inv) == man.get("export_sha256")
     return {"ok": not missing and not modified and not extra and fp_match,

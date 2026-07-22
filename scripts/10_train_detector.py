@@ -96,6 +96,24 @@ def check_data_yaml(data_yaml, dataset_dir):
     return problems
 
 
+def purge_label_caches(dataset_dir):
+    """Delete ultralytics' `labels/*.cache` and return what was removed.
+
+    The loader reads a cache INSTEAD of the .txt labels, and it is loaded *before* `on_train_start`
+    — so a pre-existing (possibly poisoned) cache decides what the model trains on while every
+    on-disk label hash still verifies clean. Removing caches forces ultralytics to parse the
+    authenticated .txt files. Also run before postflight, since training legitimately writes new
+    caches and the strict export scan counts any unmanifested file as drift."""
+    removed = []
+    if not dataset_dir:
+        return removed
+    for p in sorted(Path(dataset_dir).rglob("*.cache")):
+        if p.is_file():
+            removed.append(p.relative_to(Path(dataset_dir)).as_posix())
+            p.unlink()
+    return removed
+
+
 def make_loader_guard(dataset_dir, state):
     """on_train_start: SPLIT-AWARE + LABEL-AWARE authentication of what ultralytics ACTUALLY
     enumerated (export_verify.authenticate_loader). Verifies the train loader read exactly the
@@ -105,16 +123,23 @@ def make_loader_guard(dataset_dir, state):
     inv = json.loads((Path(dataset_dir) / "export_inventory.json").read_text())
 
     def guard(trainer):
-        def im_files(name):
-            ds = getattr(getattr(trainer, name, None), "dataset", None)
-            return list(getattr(ds, "im_files", None) or [])
-        rep = authenticate_loader(dataset_dir, inv, im_files("train_loader"), im_files("test_loader"))
+        def ds(name):
+            return getattr(getattr(trainer, name, None), "dataset", None)
+        tr_ds, va_ds = ds("train_loader"), ds("test_loader")
+        rep = authenticate_loader(
+            dataset_dir, inv,
+            list(getattr(tr_ds, "im_files", None) or []),
+            list(getattr(va_ds, "im_files", None) or []),
+            train_labels=getattr(tr_ds, "labels", None),
+            val_labels=getattr(va_ds, "labels", None),
+        )
         state["loader_guard"] = rep
         if not rep["ok"]:
             raise RuntimeError("LOADER MISMATCH — refusing to train on unverified data. "
                                + " | ".join(rep["problems"]))
         print(f"[loader-guard] train {rep['n_train']} + val {rep['n_val']} = {rep['n_files']} files "
-              f"match the manifest, consumed labels authenticated ✅", flush=True)
+              f"match the manifest; {rep['n_labels_checked']} parsed in-memory labels match the "
+              f"authenticated .txt ✅", flush=True)
     return guard
 
 
@@ -181,9 +206,13 @@ def main():
         data_yaml = args.data
     dataset_dir = Path(data_yaml).parent if data_yaml else None
 
-    # ---- PREFLIGHT: directory bytes + data.yaml target ----
-    pre, yaml_problems = None, []
+    # ---- PREFLIGHT: purge unauthenticated caches, then verify directory bytes + data.yaml ----
+    pre, yaml_problems, caches_pre = None, [], []
     if dataset_dir:
+        caches_pre = purge_label_caches(dataset_dir)
+        if caches_pre:
+            print(f"[preflight] removed {len(caches_pre)} pre-existing label cache(s) — the loader "
+                  f"must parse the authenticated .txt: {caches_pre}", flush=True)
         pre = verify_export(dataset_dir)
         print(f"[preflight] {format_report(pre)}", flush=True)
         yaml_problems = check_data_yaml(data_yaml, dataset_dir)
@@ -218,7 +247,8 @@ def main():
     save_dir = Path(model.trainer.save_dir)
     best = save_dir / "weights" / "best.pt"
 
-    # ---- POSTFLIGHT: fail closed if anything drifted during the run ----
+    # ---- POSTFLIGHT: drop the caches training wrote, then fail closed on any drift ----
+    caches_post = purge_label_caches(dataset_dir)
     post = verify_export(dataset_dir) if dataset_dir else None
     if post:
         print(f"[postflight] {format_report(post)}", flush=True)
@@ -241,6 +271,8 @@ def main():
         "dataset_export": export_info,
         "dataset_verified_pre": pre, "dataset_verified_post": post,
         "loader_guard": guard,
+        "label_caches_removed_pre": caches_pre,
+        "label_caches_removed_post": caches_post,
         "stopped_via_stopfile": state.get("stopfile_triggered", False),
         "provably_leave_one_game_out": provable,
         "output_best_sha256": sha256_file(best) if best.exists() else None,

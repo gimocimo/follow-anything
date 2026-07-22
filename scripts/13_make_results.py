@@ -14,9 +14,13 @@ thresholds are read from `results/rung1_baseline.json`, not hardcoded.
 """
 import argparse
 import json
+import sys
 from pathlib import Path
 
 PROJ = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJ / "src"))
+from pitchvision.data.export_verify import inventory_fingerprint
+
 _HEX = set("0123456789abcdef")
 
 
@@ -35,6 +39,14 @@ def _same_hash(a, b) -> bool:
 TRAIN_GAMES = ("3", "5", "6", "9")
 DEV_GAME = "4"
 FINAL_GAME = "2"
+# The canonical EVALUATION recipe, pinned. Checking only "dev == final" is not enough: an adversary
+# can set BOTH evaluations to the same wrong tracker / imgsz / classes / conf and satisfy equality
+# while the prose still claims the Rung-1-matched recipe (adversarial review, round 5).
+TRACKER_SHA = "badb024982cea5cff3b2b8d670d5e7e6f922164fc2bc4bce4f8d53274d26d92a"
+EVAL_IMGSZ = 1536
+EVAL_CLASSES = "0,1,2,3"
+EVAL_CONF = 0.25
+EVAL_N_SEQS = 18
 
 
 def _games(x):
@@ -70,11 +82,40 @@ def load_gates(rung1_path):
     return d["dev"]["metrics"]["HOTA"], d["final"]["metrics"]["HOTA"]
 
 
-def leak_free_links(tm, em, dev, fin):
-    """Derive every link from evidence, CROSS-BINDING identities so contradictory records cannot
-    pass. Adversarial review (2026-07) fed this contradictory pre/post records, a count-less loader
-    guard, a missing data.yaml SHA, and a final manifest describing a different game/tracker/imgsz —
-    and still got all-green. Each of those is now a bound, failing check. All must hold."""
+def _clean_verify(v):
+    """A verification record must be ok AND internally self-consistent. `ok:true` alongside
+    `fingerprint_match:false` or a non-empty modified/missing/extra list is a contradiction."""
+    return (v.get("ok") is True and v.get("fingerprint_match") is True
+            and (v.get("missing") or []) == [] and (v.get("modified") or []) == []
+            and (v.get("extra") or []) == [])
+
+
+def _protocol_ok(m, game, source_split, role):
+    """The evaluation must match the CANONICAL pinned recipe — not merely equal the other side."""
+    d, t = _det(m), _trk(m)
+    meta = (((m.get("provenance") or {}).get("split") or {}).get("meta") or {})
+    try:
+        conf_ok = float(d.get("conf")) == EVAL_CONF
+    except (TypeError, ValueError):
+        conf_ok = False
+    return (_eval_game(m) == game
+            and meta.get("source_split") == source_split
+            and meta.get("role") == role
+            and meta.get("policy") == "leave-one-game-out"
+            and m.get("n_seqs") == EVAL_N_SEQS
+            and m.get("subset") is False
+            and _same_hash(t.get("sha256"), TRACKER_SHA)
+            and d.get("imgsz") == EVAL_IMGSZ
+            and str(d.get("classes")) == EVAL_CLASSES
+            and conf_ok)
+
+
+def leak_free_links(tm, em, dev, fin, inv=None):
+    """Derive every link from evidence, anchored on GROUND TRUTH (the committed per-file inventory)
+    and on the pinned canonical recipe — not on records agreeing with each other. Round-4 review got
+    all-green from contradictory manifests; round 5 then got all-green from mutually-consistent but
+    wrong values (counts of 1, `ok:true` beside `modified:['x']`, non-empty loader `problems`, a
+    1-sequence final eval, conf 0.99, and both evals at imgsz 640). All must hold."""
     de = tm.get("dataset_export") or {}
     pre = tm.get("dataset_verified_pre") or {}
     post = tm.get("dataset_verified_post") or {}
@@ -83,41 +124,64 @@ def leak_free_links(tm, em, dev, fin):
     bestsha = tm.get("output_best_sha256")
     wsha, fsha = _det(dev).get("sha256"), _det(fin).get("sha256")
     observed, requested = _games(em.get("observed_games")), _games(em.get("requested_games"))
-    n_exp = pre.get("n_expected")
+
+    # Ground truth: the committed inventory itself, not any manifest's description of it.
+    inv_ok = isinstance(inv, list) and len(inv) > 0
+    n_inv = len(inv) if inv_ok else None
+    n_train = sum(1 for e in inv if e.get("subset") == "train") if inv_ok else None
+    n_val = sum(1 for e in inv if e.get("subset") == "val") if inv_ok else None
+    inv_games = {str(e.get("game_id")) for e in inv} if inv_ok else set()
+    try:
+        fp_ok = inv_ok and _same_hash(inventory_fingerprint(inv), esha)
+    except Exception:
+        fp_ok = False
+
     links = {
-        # dataset identity: export manifest, train manifest's embedded export, and BOTH pre/post
-        # verifications must all cite the same export_sha256 over the training game set.
+        # --- dataset identity, anchored on the committed inventory ---
+        "inventory_backs_export_sha256": fp_ok,
+        "inventory_games_are_train_games": inv_ok and inv_games == set(TRAIN_GAMES),
         "train_manifest_links_export": _same_hash(de.get("export_sha256"), esha),
-        "pre_verify_matches_export": (pre.get("ok") is True and _same_hash(pre.get("export_sha256"), esha)
-                                      and _games(pre.get("games")) == set(TRAIN_GAMES)),
-        "post_verify_matches_export": (post.get("ok") is True and _same_hash(post.get("export_sha256"), esha)
-                                       and _games(post.get("games")) == set(TRAIN_GAMES)),
-        "verify_counts_consistent": (isinstance(n_exp, int) and n_exp > 0 and post.get("n_expected") == n_exp),
-        # loader: the hardened guard confirms the SPLIT and the LABELS, over the same file count.
-        "loader_split_authenticated": (guard.get("ok") is True and guard.get("train_matches_manifest") is True
-                                       and guard.get("val_matches_manifest") is True),
-        "loader_labels_authenticated": (guard.get("labels_authenticated") is True and guard.get("n_files") == n_exp),
-        # data.yaml authenticated AND its SHA recorded, so the checkpoint is bound to THIS yaml.
-        "data_yaml_authenticated": (tm.get("data_yaml_problems") == [] and _valid_sha(tm.get("data_yaml_sha256"))),
-        # checkpoint: train-manifest output == the weights BOTH evals actually loaded.
+        "embedded_export_matches_standalone": (_games(de.get("observed_games")) == observed
+                                               and _games(de.get("requested_games")) == requested
+                                               and observed == requested == set(TRAIN_GAMES)),
+        "pre_verify_clean_and_matches_export": (_clean_verify(pre)
+                                                and _same_hash(pre.get("export_sha256"), esha)
+                                                and _games(pre.get("games")) == set(TRAIN_GAMES)),
+        "post_verify_clean_and_matches_export": (_clean_verify(post)
+                                                 and _same_hash(post.get("export_sha256"), esha)
+                                                 and _games(post.get("games")) == set(TRAIN_GAMES)),
+        "verify_counts_match_inventory": (inv_ok and pre.get("n_expected") == n_inv
+                                          and post.get("n_expected") == n_inv),
+        # --- loader: split, on-disk labels, PARSED in-memory labels, counts, and no problems ---
+        "loader_split_authenticated": (guard.get("ok") is True
+                                       and guard.get("train_matches_manifest") is True
+                                       and guard.get("val_matches_manifest") is True
+                                       and (guard.get("problems") or []) == []),
+        "loader_labels_authenticated": (guard.get("labels_authenticated") is True
+                                        and guard.get("in_memory_labels_authenticated") is True),
+        "loader_counts_match_inventory": (inv_ok and guard.get("n_files") == n_inv
+                                          and guard.get("n_train") == n_train
+                                          and guard.get("n_val") == n_val
+                                          and guard.get("n_labels_checked") == n_inv),
+        # --- data.yaml authenticated AND its SHA recorded ---
+        "data_yaml_authenticated": (tm.get("data_yaml_problems") == []
+                                    and _valid_sha(tm.get("data_yaml_sha256"))),
+        # --- checkpoint: train-manifest output == the weights BOTH evals loaded ---
         "train_manifest_binds_output_checkpoint": _same_hash(bestsha, wsha),
         "dev_and_final_same_checkpoint": _same_hash(wsha, fsha),
-        # games: export is exactly the training set; neither eval game is present.
+        # --- games ---
         "export_games_are_exactly_train_games": observed == requested == set(TRAIN_GAMES),
         "eval_games_excluded_from_training": bool(observed) and {DEV_GAME, FINAL_GAME}.isdisjoint(observed),
-        # eval protocol: dev scored game 4, final scored game 2, both via the SAME tracker/imgsz/classes
-        # (derived from each manifest, not hardcoded — Codex swapped these freely in the final).
-        "dev_scored_dev_game": _eval_game(dev) == DEV_GAME,
-        "final_scored_final_game": _eval_game(fin) == FINAL_GAME,
-        "dev_final_same_eval_protocol": (_same_hash(_trk(dev).get("sha256"), _trk(fin).get("sha256"))
-                                         and _det(dev).get("imgsz") == _det(fin).get("imgsz")
-                                         and str(_det(dev).get("classes")) == str(_det(fin).get("classes"))),
+        # --- eval protocol pinned to the canonical recipe (game, split/role, n_seqs, full-set,
+        #     tracker SHA, imgsz, classes, conf) — for EACH evaluation independently ---
+        "dev_matches_canonical_protocol": _protocol_ok(dev, DEV_GAME, "train", "development"),
+        "final_matches_canonical_protocol": _protocol_ok(fin, FINAL_GAME, "valid", "final"),
     }
     return links, wsha
 
 
-def build(dev, fin, pc, oc, em, tm, dev_gate, fin_gate):
-    links, wsha = leak_free_links(tm, em, dev, fin)
+def build(dev, fin, pc, oc, em, tm, dev_gate, fin_gate, inv=None):
+    links, wsha = leak_free_links(tm, em, dev, fin, inv)
     return {
         "note": "Rung-3 result: yolo11l @ 1536 (4-class: player/goalkeeper/referee/ball) fine-tuned on "
                 "every frame of GSR games {5,6,9}, with game 3 held out entirely as cross-match validation "
@@ -172,13 +236,15 @@ def main():
     oc = _load(Path(args.dev_dir) / "occlusion_metrics.json")
     em = _load(Path(args.prov_dir) / "export_manifest.json")
     tm = _load(Path(args.prov_dir) / "train_manifest.json")
+    inv = _load(Path(args.prov_dir) / "export_inventory.json")
     missing = [n for n, v in (("dev metrics", dev), ("final metrics", fin),
-                              ("export_manifest", em), ("train_manifest", tm)) if v is None]
+                              ("export_manifest", em), ("train_manifest", tm),
+                              ("export_inventory", inv)) if v is None]
     if missing:
         raise SystemExit(f"missing required inputs: {missing}")
 
     dev_gate, fin_gate = load_gates(args.rung1)
-    out = build(dev, fin, pc, oc, em, tm, dev_gate, fin_gate)
+    out = build(dev, fin, pc, oc, em, tm, dev_gate, fin_gate, inv)
     Path(args.out).write_text(json.dumps(out, indent=2) + "\n")
     lf = out["leak_free"]
     print(f"wrote {args.out}")

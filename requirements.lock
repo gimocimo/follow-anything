@@ -1,3 +1,6 @@
+# LOCAL development lock (macOS/MPS). This is NOT the runtime that produced the certified
+# Rung-3 numbers: those ran on a CUDA pod, and the exact versions are recorded in the
+# runtime manifests -> results/rung3_provenance/certified_runtime.json (derived from them).
 antlr4-python3-runtime==4.9.3
 anyio==4.14.2
 babel==2.18.0
